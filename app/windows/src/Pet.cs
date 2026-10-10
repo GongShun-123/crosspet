@@ -97,6 +97,7 @@ namespace CrossPet
             appSwitch.Tick += (_, __) => { appSwitch.Stop(); FollowForeground(); };
             foreground = new Native.ForegroundWatcher(() =>
             {
+                fullscreenOverride = false;   // 前台窗口换了：双击托盘临时叫出来的作废，重新按全屏规则来
                 if (hwnd != IntPtr.Zero && Window.Topmost) Native.BringToTop(hwnd);
                 appSwitch.Stop(); appSwitch.Start();
             });
@@ -341,10 +342,11 @@ namespace CrossPet
         {
             if (Window == null || hwnd == IntPtr.Zero) return;
             // 全屏时隐藏
-            var hide = HideFullscreen && Native.InFullscreen();
+            var hide = HideFullscreen && !fullscreenOverride && Native.InFullscreen(hwnd);
             if (hide != hiddenForFullscreen)
             {
                 hiddenForFullscreen = hide;
+                Store.Log(hide ? $"全屏中，先藏起来（前台 {Native.ForegroundExe()}）" : "退出全屏，出来了");
                 if (hide) Window.Hide(); else { Window.Show(); if (Window.Topmost) Native.BringToTop(hwnd); }
             }
             var top = LayerMode == "always" || (LayerMode == "ai" && AIActive());
@@ -677,8 +679,11 @@ namespace CrossPet
             Undock();
             Store.Settings.Remove("position"); Store.SaveSettings();
             RestorePosition();
+            fullscreenOverride = true; hiddenForFullscreen = false;   // 你主动叫她：全屏时也出来，前台窗口换了再按规则藏
             Window.Show();
+            if (Window.Topmost) Native.BringToTop(hwnd);
         }
+        bool fullscreenOverride;
 
         // ---------------- 菜单 ----------------
         void FillMenu(Forms.ContextMenuStrip menu, bool developer)
@@ -1059,6 +1064,12 @@ namespace CrossPet
                 });
                 var flags = new List<string> { "层级 " + LayerMode, HideFullscreen ? "全屏隐藏" : "全屏不隐藏" };
                 if (dock != null) flags.Add(dock == "left" ? "贴左边" : "贴右边");
+                if (hiddenForFullscreen) flags.Add("此刻因全屏藏着");
+                if (hwnd != IntPtr.Zero && Native.GetWindowRect(hwnd, out var wr))
+                {
+                    var onAny = all.Any(sc => sc.WorkingArea.IntersectsWith(new System.Drawing.Rectangle(wr.Left + 40, wr.Top + 40, Math.Max(1, wr.Right - wr.Left - 80), Math.Max(1, wr.Bottom - wr.Top - 80))));
+                    flags.Add($"窗口 {wr.Left},{wr.Top} {wr.Right - wr.Left}×{wr.Bottom - wr.Top}{(onAny ? "" : "（不在任何屏幕里）")}{(Window.IsVisible ? "" : "（隐藏）")}");
+                }
                 return $"{all.Length} 块：{string.Join("、", parts)}；{string.Join("，", flags)}";
             }
             catch { return ""; }

@@ -71,11 +71,36 @@ namespace CrossPet
                 SetWindowPos(hwnd, front, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
 
-        // 用户现在是不是在全屏程序里（全屏视频 / 游戏 / 演示）：系统自己判断「这时候别打扰」用的就是它
+        // 桌宠所在的那块屏幕上，是不是有全屏程序（全屏视频 / 游戏 / 演示）。
+        // 以前只用系统的「勿扰」状态（SHQueryUserNotificationState）：它是整台电脑的，另一块屏幕全屏、
+        // 或者某些程序让它一直挂着，副屏上的桌宠也被藏起来、怎么都不出来。现在要求前台窗口真的铺满桌宠这块屏幕
         [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
-        public static bool InFullscreen()
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
+        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public int dwFlags; }
+        public static bool InFullscreen(IntPtr pet)
         {
-            try { return SHQueryUserNotificationState(out var s) == 0 && (s == 2 || s == 3 || s == 4); }   // BUSY / D3D 全屏 / 演示模式
+            try
+            {
+                var front = GetForegroundWindow();
+                if (front == IntPtr.Zero || front == pet) return false;
+                front = GetAncestor(front, 2) is var root && root != IntPtr.Zero ? root : front;   // GA_ROOT
+                var cls = new StringBuilder(64); GetClassName(front, cls, 64);
+                var c = cls.ToString();
+                if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd") return false;   // 桌面、任务栏
+                var mon = MonitorFromWindow(pet, 2);   // MONITOR_DEFAULTTONEAREST
+                if (mon != MonitorFromWindow(front, 2)) return false;   // 全屏的是另一块屏幕
+                var info = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+                if (!GetMonitorInfo(mon, ref info) || !GetWindowRect(front, out var r)) return false;
+                var m = info.rcMonitor;
+                var covers = r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;   // 盖住整块屏幕（连任务栏）
+                if (covers) return true;
+                // D3D 独占全屏 / 演示模式：系统状态说了算，但也得是这块屏幕上的前台窗口
+                return SHQueryUserNotificationState(out var s) == 0 && (s == 3 || s == 4) && r.Right - r.Left >= m.Right - m.Left - 2;
+            }
             catch { return false; }
         }
 
