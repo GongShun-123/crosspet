@@ -197,6 +197,15 @@ try:
 except Exception:
     sys.exit(0)
 
+# 心跳：「最近一次收到这个 AI 的消息」，桌宠记下来，设置里能看出「接上了但从没收到过消息」，反馈里也带着。
+# 文件名按接入的是哪个 AI 分（Antigravity 和 Gemini CLI 都用 gemini 角色，Antigravity 多带一个事件名参数）
+try:
+    seen_key = "antigravity" if character == "gemini" and len(sys.argv) > 2 else character
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / f"seen-{seen_key}").write_text(str(int(time.time())))
+except Exception:
+    pass
+
 # Codex 会在对话结束后自己在后台整理记忆（工作目录在 ~/.codex/memories），也会调工具，但不是你让它干的活，
 # 而且没有开始 / 结束事件，演了会一直停在思考：工作目录在 Codex 自己的配置目录里的事件都不管
 if character == "gpt":

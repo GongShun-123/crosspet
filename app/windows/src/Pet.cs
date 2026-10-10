@@ -795,8 +795,41 @@ namespace CrossPet
         DispatcherTimer healPending;
         static string ClaudeSettings => Path.Combine(Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is string d && d != "" ? d
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"), "settings.json");
+        // ---------------- 心跳：各个 AI 最近一次发来消息的时间（和 macOS 版一样） ----------------
+        static readonly Dictionary<string, string> SeenKeys = new Dictionary<string, string>
+        {
+            ["claude-hooks"] = "claude", ["claude-mod"] = "claude-mod", ["codex"] = "gpt", ["deepseek"] = "deepseek", ["gemini"] = "gemini",
+            ["antigravity"] = "antigravity", ["workbuddy"] = "workbuddy", ["zcode"] = "zcode", ["hermes"] = "hermes",
+        };
+        static Dictionary<string, object> LastSeen => Store.Settings.TryGetValue("seen", out var v) && v is Dictionary<string, object> d ? d : new Dictionary<string, object>();
+        static double? SeenAt(string key) => LastSeen.TryGetValue(key, out var v) ? Convert.ToDouble(v) : (double?)null;
+        void RefreshSeen()
+        {
+            var seen = new Dictionary<string, object>(LastSeen); var changed = false;
+            foreach (var key in SeenKeys.Values.Distinct())
+            {
+                try
+                {
+                    var f = Path.Combine(Store.State, "seen-" + key);
+                    if (!File.Exists(f) || !double.TryParse(File.ReadAllText(f).Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ts)) continue;
+                    if (seen.TryGetValue(key, out var old) && Convert.ToDouble(old) >= ts) continue;
+                    seen[key] = ts; changed = true;
+                }
+                catch { }
+            }
+            if (changed) { Store.Settings["seen"] = seen; Store.SaveSettings(); settings?.Push(); }
+        }
+        static double Now => (DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
+        static string AgoText(double? ts)
+        {
+            if (ts == null) return "从没收到";
+            var d = Now - ts.Value;
+            return d >= 86400 ? $"{(int)(d / 86400)} 天前" : d >= 3600 ? $"{(int)(d / 3600)} 小时前" : d >= 60 ? $"{(int)(d / 60)} 分钟前" : "刚刚";
+        }
+
         void WatchClaudeConfig()
         {
+            RefreshSeen();
             if (!ready) return;
             DateTime stamp;
             try { var fi = new FileInfo(ClaudeSettings); if (!fi.Exists) return; stamp = fi.LastWriteTimeUtc; } catch { return; }
@@ -874,7 +907,8 @@ namespace CrossPet
                     return d;
                 }).ToList(),
                 ["integrations"] = integrated == null ? null : IntegrationTargets.Select(t => new Dictionary<string, object>
-                    { ["id"] = t.id, ["label"] = t.label, ["note"] = t.note, ["installed"] = integrated.Contains(t.id) }).ToList(),
+                    { ["id"] = t.id, ["label"] = t.label, ["note"] = t.note, ["installed"] = integrated.Contains(t.id),
+                      ["lastSeen"] = SeenAt(SeenKeys.TryGetValue(t.id, out var sk) ? sk : "") is double ts ? (object)(Now - ts) : null }).ToList(),
             };
             if (latestRelease is var (tag, _) && updateZip != null) state["update"] = tag;
             return state;
@@ -1046,7 +1080,39 @@ namespace CrossPet
                 ["os"] = $"{Environment.OSVersion.VersionString} {System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}",
                 ["character"] = current ?? "", ["integrations"] = integrated ?? new List<string>(), ["log"] = tail, ["install"] = InstallId,
                 ["displays"] = DisplaysSummary(),
+                ["runtime"] = Redact(RuntimeSummary()), ["diag"] = Redact(diagText),
             };
+        }
+        string lastUpdateCheck = "还没查过", diagText = "";
+        readonly DateTime launchedAt = DateTime.Now;
+        /// <summary>反馈附带的运行状态：一次把排查要用的都列出来（不读对话、不带 Key）</summary>
+        string RuntimeSummary()
+        {
+            var L = new List<string>();
+            try
+            {
+                L.Add($"前台程序 {Native.ForegroundExe()}");
+                var vis = Window?.IsVisible == true;
+                var rect = "";
+                if (hwnd != IntPtr.Zero && Native.GetWindowRect(hwnd, out var r))
+                {
+                    var on = Forms.Screen.AllScreens.Any(sc => sc.WorkingArea.IntersectsWith(new System.Drawing.Rectangle(r.Left + 40, r.Top + 40, Math.Max(1, r.Right - r.Left - 80), Math.Max(1, r.Bottom - r.Top - 80))));
+                    rect = $"窗口 {r.Left},{r.Top} {r.Right - r.Left}×{r.Bottom - r.Top}{(on ? "" : "（不在任何屏幕里）")}；";
+                }
+                L.Add($"{rect}显示中 {(vis ? "是" : "否")}，因全屏藏着 {(hiddenForFullscreen ? "是" : "否")}，置顶 {(Window?.Topmost == true ? "是" : "否")}；层级 {LayerMode}；贴边 {dock ?? "无"}{(dock != null ? (dockOut ? "·跑出来了" : "·缩着") : "")}；大小 {(int)(Scale * 100)}%；网页 {(ready ? "就绪" : "没就绪")}");
+                var skins = Store.Settings.TryGetValue("skins", out var sv) ? Store.Json.Serialize(sv) : "";
+                L.Add($"角色 {current}{(skins == "" || skins == "{}" ? "" : "，衣服 " + skins)}；设置：名字 {(ShowName ? "开" : "关")}，光晕 {AuraMode}，省电 {(PowerSave ? "开" : "关")}，彩蛋 {(EggsEnabled ? "开" : "关")}，"
+                      + $"跟随前台 {(Store.Flag("followApps") ? "开" : "关")}，跟随事件 {(Store.Flag("followEvents") ? "开" : "关")}，AI 干活自动出现 {(AIAutostart ? "开" : "关")}，贴边 {(EdgeDockEnabled ? "开" : "关")}，"
+                      + $"GPT 额度 {(Store.Flag("gptQuota") ? "开" : "关")}，Gemini 额度 {(Store.Flag("agyQuota") ? "开" : "关")}，DeepSeek 余额 {(DsQuotaEnabled ? "开" : "关")}，登录启动 {(LoginEnabled ? "开" : "关")}");
+                var now = DateTime.UtcNow;
+                var poses = lastPose.Select(p => $"{p.Key}={p.Value.pose}（{(int)(now - p.Value.at).TotalSeconds}秒前）").OrderBy(x => x).ToList();
+                L.Add("最近状态 " + (poses.Count == 0 ? "无" : string.Join("，", poses)));
+                L.Add("最近收到消息 " + string.Join("，", SeenKeys.Keys.OrderBy(k => k).Select(k => $"{k} {AgoText(SeenAt(SeenKeys[k]))}")));
+                string wv = "?"; try { wv = CoreWebView2Environment.GetAvailableBrowserVersionString(); } catch { }
+                L.Add($"装在 {Store.Install}；数据 {Store.Data}；随包 Python {(File.Exists(Store.Python) ? "在" : "不在")}；WebView2 {wv}；检查更新 {lastUpdateCheck}；已运行 {(int)(DateTime.Now - launchedAt).TotalMinutes} 分钟");
+            }
+            catch (Exception e) { L.Add("运行状态出错：" + e.Message); }
+            return string.Join("\n", L);
         }
         /// <summary>反馈附带的显示信息：几块显示器、各自大小和相对主屏的位置、桌宠在哪块、显示层级 / 全屏隐藏 / 贴边</summary>
         string DisplaysSummary()
@@ -1082,6 +1148,13 @@ namespace CrossPet
             {
                 feedback?.Run($"setInfo({Store.Json.Serialize(FeedbackInfo())})");
                 if (integrated == null) RefreshIntegrated(() => feedback?.Run($"setInfo({Store.Json.Serialize(FeedbackInfo())})"));
+                if (File.Exists(Store.Python))
+                    Task.Run(() =>
+                    {
+                        var (output, _) = RunIntegrate("diagnose");
+                        diagText = output.Trim(); if (diagText.Length > 4000) diagText = diagText.Substring(0, 4000);
+                        Window.Dispatcher.Invoke(() => feedback?.Run($"setInfo({Store.Json.Serialize(FeedbackInfo())})"));
+                    });
                 return;
             }
             var endpoint = Store.Settings.TryGetValue("feedbackURL", out var u) && u is string us && us != "" ? us : FeedbackEndpoint;
@@ -1220,6 +1293,7 @@ namespace CrossPet
                     var url = body != null && body.TryGetValue("html_url", out var u) && u is string s && s.StartsWith("https://github.com/") ? s : $"https://github.com/{Repo}/releases/tag/{tag}";
                     var first = latestRelease?.tag != tag;
                     latestRelease = (tag, url);
+                    lastUpdateCheck = $"{DateTime.Now:MM-dd HH:mm} 最新 {tag}";
                     updateZip = null;
                     if (fromPage) updateZip = $"https://github.com/{Repo}/releases/download/{tag}/CrossPet-Windows.zip";   // 包名固定（一键更新按名字找）
                     else if (body.TryGetValue("assets", out var a) && a is object[] assets)
@@ -1233,11 +1307,16 @@ namespace CrossPet
                     settings?.Push();
                     if (manual && updateZip == null) Open(url);
                 }
-                else if (manual) MessageBox.Show(tag == null ? "暂时连不上 GitHub，稍后再试。" : $"已经是最新版本（{Store.Version}）。", "CrossPet");
+                else
+                {
+                    lastUpdateCheck = $"{DateTime.Now:MM-dd HH:mm} " + (tag == null ? "没拿到版本号" : $"已是最新（{tag}）");
+                    if (manual) MessageBox.Show(tag == null ? "暂时连不上 GitHub，稍后再试。" : $"已经是最新版本（{Store.Version}）。", "CrossPet");
+                }
             }
             catch (Exception e)
             {
                 Store.Log("检查更新失败: " + e.Message);
+                lastUpdateCheck = $"{DateTime.Now:MM-dd HH:mm} 失败：{e.Message}";
                 if (manual) MessageBox.Show("检查更新失败：" + e.Message, "CrossPet");
             }
         }

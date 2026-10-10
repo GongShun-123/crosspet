@@ -74,6 +74,7 @@ async function dropSession($: EngineInterface, who: string, sid: string): Promis
 // 同时开着好几个会话在干活时，桌宠演「手忙脚乱」，每个会话一张小卡片
 type State = { pose: string; event: string; tool: string; ts: number }
 async function setState($: EngineInterface, state: State): Promise<void> {
+  await write($, 'seen-claude-mod', String(Math.floor(Date.now() / 1000))).catch(() => {})   // 心跳：最近一次收到消息
   let sid = ''
   try { sid = await $.session.id() } catch {}
   const who = actors.get(sid) ?? ID

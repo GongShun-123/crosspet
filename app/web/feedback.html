@@ -46,7 +46,7 @@ body.sent .done { display: block; }
   <div class="ask" id="ask">具体是哪里？<em>必填</em></div>
   <input type="text" id="text" maxlength="200" placeholder="先在上面选一个">
   <label class="attach"><input type="checkbox" id="attach" checked>
-    <span>附上版本、系统、接入了哪些 AI 和最近的运行日志，帮我查问题（路径里的用户名会被隐去）
+    <span>附上版本、系统、运行状态、各个 AI 的接入情况和最近的运行日志，帮我查问题（只有路径、开关和时间，不含对话和密钥；路径里的用户名会被隐去）
       <a id="peek">看看会发什么</a></span></label>
   <pre id="preview" class="hidden"></pre>
   <div class="bar"><span class="msg" id="msg"></span><button class="send" id="send" disabled>发送</button></div>
@@ -102,8 +102,11 @@ function refresh() {
   $('send').disabled = sending || !ready
 }
 
-// 飞书卡片里附带的日志：只留最后 3000 字，整条消息要在 20 KB 以内
-const logTail = () => (info?.log || '').slice(-3000)
+// 飞书卡片里附带的：运行状态、接入诊断、最近日志。整条消息要在 20 KB 以内（中文一个字 3 字节），按字数截
+let budget = 1   // 超过 20 KB 时按比例缩短（见发送）
+const logTail = () => (info?.log || '').slice(-Math.floor(1800 * budget))
+const runtime = () => (info?.runtime || '').slice(0, Math.floor(1500 * Math.max(budget, .6)))
+const diag = () => (info?.diag || '').slice(0, Math.floor(2800 * budget))
 
 // 拼飞书群机器人的卡片消息。用户写的话和日志一律用 plain_text，不让里面的内容变成格式、链接或 @
 function card(tags, text, attach) {
@@ -115,6 +118,8 @@ function card(tags, text, attach) {
   if (attach) meta.push(`系统 ${i.os || '?'}`, `已接入 ${(i.integrations || []).join(', ') || '—'}`)
   if (attach && i.displays) meta.push(`显示 ${i.displays}`)   // 显示器几块、怎么排、桌宠在哪块、显示层级 / 贴边：多显示器的问题靠它看
   elements.push({ tag: 'div', fields: meta.map(m => ({ is_short: true, text: pt(m) })) })
+  if (attach && runtime()) elements.push({ tag: 'note', elements: [pt('运行状态：\n' + runtime())] })
+  if (attach && diag()) elements.push({ tag: 'note', elements: [pt('接入诊断：\n' + diag())] })
   if (attach && logTail()) elements.push({ tag: 'note', elements: [pt('最近日志：\n' + logTail())] })
   elements.push({ tag: 'note', elements: [pt(`机器 ${(i.install || '').slice(0, 8)}`)] })
   return {
@@ -130,7 +135,8 @@ function setInfo(i) {
   info = i
   const lines = [
     `版本：${i.version}（${i.platform}）`, `系统：${i.os}`, `当前角色：${i.character || '—'}`,
-    `已接入：${(i.integrations || []).join(', ') || '—'}`, ...(i.displays ? [`显示：${i.displays}`] : []), '', '最近的运行日志：', logTail() || '（没有）',
+    `已接入：${(i.integrations || []).join(', ') || '—'}`, ...(i.displays ? [`显示：${i.displays}`] : []),
+    '', '运行状态：', runtime() || '（没有）', '', '接入诊断：', diag() || '（正在检查…）', '', '最近的运行日志：', logTail() || '（没有）',
   ]
   $('preview').textContent = lines.join('\n')
 }
@@ -151,7 +157,14 @@ $('send').onclick = () => {
   sending = true; refresh()
   $('msg').textContent = '正在发送…'; $('msg').classList.remove('err')
   const tags = TAGS.map(t => t[0]).filter(t => picked.has(t))
-  post({ cmd: 'send', body: JSON.stringify(card(tags, $('text').value.trim(), $('attach').checked)) })
+  // 飞书机器人一条消息 20 KB：超了就把附带的日志、诊断按比例缩短，别让用户看到「太长」发不出去
+  let body
+  for (budget = 1; budget > .05; budget *= .7) {
+    body = JSON.stringify(card(tags, $('text').value.trim(), $('attach').checked))
+    if (new TextEncoder().encode(body).length <= 19000) break
+  }
+  budget = 1
+  post({ cmd: 'send', body })
 }
 
 refresh()

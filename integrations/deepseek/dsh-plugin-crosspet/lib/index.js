@@ -88,7 +88,12 @@ export function apply(ctx, config = {}) {
       .catch(() => {});
   }
 
+  let seenAt = 0;
   function state(pose, event, tool = "") {
+    if (Date.now() - seenAt > 10000) {   // 心跳：最近一次收到消息（桌宠记下来，设置和反馈里看）
+      seenAt = Date.now();
+      mkdir(dir, { recursive: true }).then(() => writeFile(join(dir, "seen-deepseek"), String(Math.floor(seenAt / 1000)))).catch(() => {});
+    }
     writeJson(`${character}-state.json`, { pose, event, tool, ts: Date.now() / 1000 }).catch((e) =>
       ctx.logger?.warn?.(`crosspet: 写状态失败 ${String(e)}`),
     );

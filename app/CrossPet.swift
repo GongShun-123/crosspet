@@ -225,7 +225,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         }.resume()
     }
 
+    var lastUpdateCheck = "还没查过"
     func gotLatest(_ tag: String, page: URL?, manual: Bool) {
+            DispatchQueue.main.async { self.lastUpdateCheck = "\(Self.clock()) " + (tag.isEmpty ? "没拿到版本号" : "最新 \(tag)") }
             DispatchQueue.main.async {
                 if !tag.isEmpty, let page = page, self.isNewer(tag, than: self.currentVersion) {
                     let isFresh = self.latestRelease?.tag != tag
@@ -1350,7 +1352,8 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         if let r = latestRelease, canSelfUpdate { state["update"] = r.tag }
         if let list = integrated, integrateScript != nil {
             state["integrations"] = Self.integrationTargets.map {
-                ["id": $0.id, "label": $0.label, "note": $0.note, "installed": list.contains($0.id)] as [String: Any]
+                ["id": $0.id, "label": $0.label, "note": $0.note, "installed": list.contains($0.id),
+                 "lastSeen": lastSeen[Self.seenKeys[$0.id] ?? ""].map { Date().timeIntervalSince1970 - $0 as Any } ?? NSNull()] as [String: Any]
             }
         }
         return state
@@ -1419,7 +1422,32 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
         return dir.appendingPathComponent("settings.json")
     }
+    // MARK: 心跳：各个 AI 最近一次发来消息的时间
+    // 钩子 / 插件每收到一条事件就在状态目录写 seen-<名字>（时间戳）。状态目录 /tmp 重启会清空，所以桌宠把读到的最新时间存进设置。
+    // 设置里据此标出「接上了但从没收到过消息」，反馈里也带着
+    static let seenKeys = ["claude-hooks": "claude", "claude-mod": "claude-mod", "codex": "gpt", "deepseek": "deepseek", "gemini": "gemini",
+                           "antigravity": "antigravity", "workbuddy": "workbuddy", "zcode": "zcode", "hermes": "hermes"]
+    var lastSeen: [String: Double] {
+        get { (defaults.dictionary(forKey: "seen") as? [String: Double]) ?? [:] }
+        set { defaults.set(newValue, forKey: "seen") }
+    }
+    func refreshSeen() {
+        var seen = lastSeen, changed = false
+        for key in Set(Self.seenKeys.values) {
+            guard let text = try? String(contentsOf: stateDir.appendingPathComponent("seen-\(key)"), encoding: .utf8),
+                  let ts = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)), ts > (seen[key] ?? 0) else { continue }
+            seen[key] = ts; changed = true
+        }
+        if changed { lastSeen = seen; if settingsWeb != nil { pushSettings() } }
+    }
+    static func agoText(_ ts: Double?) -> String {
+        guard let ts else { return "从没收到" }
+        let d = Date().timeIntervalSince1970 - ts
+        return d >= 86400 ? "\(Int(d / 86400)) 天前" : d >= 3600 ? "\(Int(d / 3600)) 小时前" : d >= 60 ? "\(Int(d / 60)) 分钟前" : "刚刚"
+    }
+
     func watchClaudeConfig() {
+        refreshSeen()
         guard ready, let stamp = (try? FileManager.default.attributesOfItem(atPath: claudeSettingsURL.path))?[.modificationDate] as? Date,
               stamp != claudeConfigStamp else { return }
         claudeConfigStamp = stamp
@@ -1632,7 +1660,37 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             "displays": displaysSummary(),
             "log": String(Self.redact(tail).suffix(6000)),
             "install": installId,
+            "runtime": Self.redact(runtimeSummary()),
+            "diag": Self.redact(diagText),
         ]
+    }
+
+    static func clock() -> String { let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"; return f.string(from: Date()) }
+    let launchedAt = Date()
+    var diagText = ""   // 接入工具的诊断（integrate.py diagnose），反馈窗口打开时跑一次
+
+    /// 反馈附带的运行状态：一次把排查要用的都列出来（不读对话、不带 Key）
+    func runtimeSummary() -> String {
+        var L: [String] = []
+        let front = NSWorkspace.shared.frontmostApplication
+        L.append("前台程序 \(front?.localizedName ?? "-")（\(front?.bundleIdentifier ?? "-")）")
+        let f = panel.frame
+        let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(f.insetBy(dx: 40, dy: 40)) }
+        L.append("窗口 \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height))\(onScreen ? "" : "（不在任何屏幕里）")；"
+                 + "显示中 \(panel.isVisible ? "是" : "否")，没被挡住 \(panel.occlusionState.contains(.visible) ? "是" : "否")，因全屏收着 \(hiddenForFullscreen ? "是" : "否")；"
+                 + "层级 \(layerMode)（现在\(panel.level == .floating ? "置顶" : "普通")）；贴边 \(dock ?? "无")\(dock != nil ? (dockOut ? "·跑出来了" : "·缩着") : "")；大小 \(Int(petScale * 100))%")
+        let skins = (defaults.dictionary(forKey: "skins") as? [String: String]) ?? [:]
+        L.append("角色 \(currentId ?? "-")\(skins.isEmpty ? "" : "，衣服 \(skins)")；设置：名字 \(showName ? "开" : "关")，光晕 \(auraMode)，省电 \(powerSave ? "开" : "关")，彩蛋 \(eggsEnabled ? "开" : "关")，"
+                 + "跟随前台 \(followApps ? "开" : "关")，AI 干活自动出现 \(aiAutostart ? "开" : "关")，贴边 \(edgeDockEnabled ? "开" : "关")，"
+                 + "GPT 额度 \(defaults.bool(forKey: "gptQuota") ? "开" : "关")，Gemini 额度 \(defaults.bool(forKey: "agyQuota") ? "开" : "关")，DeepSeek 余额 \(dsQuotaEnabled ? "开" : "关")")
+        let now = Date()
+        let poses = lastPose.map { "\($0.key)=\($0.value.pose)（\(Int(now.timeIntervalSince($0.value.at)))秒前）" }.sorted()
+        L.append("最近状态 \(poses.isEmpty ? "无" : poses.joined(separator: "，"))")
+        let seen = lastSeen
+        L.append("最近收到消息 " + Self.seenKeys.keys.sorted().map { "\($0) \(Self.agoText(seen[Self.seenKeys[$0]!]))" }.joined(separator: "，"))
+        L.append("装在 \(Bundle.main.bundlePath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))\(canSelfUpdate ? "" : "（不在应用程序文件夹，不能一键更新）")；"
+                 + "开发者工具/python3 \(pythonReady ? "有" : "没有")；检查更新 \(lastUpdateCheck)；已运行 \(Int(now.timeIntervalSince(launchedAt) / 60)) 分钟")
+        return L.joined(separator: "\n")
     }
 
     /// 反馈附带的显示信息：几块显示器、各自大小和相对主屏的位置、桌宠在哪块、显示器是否各有空间、显示层级 / 全屏隐藏 / 贴边
@@ -1695,6 +1753,12 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             }.resume()
         default:   // get：反馈窗口刚打开
             pushFeedbackInfo()
+            if pythonReady, integrateScript != nil {
+                runIntegrate(["diagnose"]) { [weak self] out, _ in
+                    self?.diagText = String(out.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4000))
+                    self?.pushFeedbackInfo()
+                }
+            }
             if integrated == nil, integrateScript != nil {
                 runIntegrate(["installed"]) { [weak self] out, _ in
                     let last = out.split(separator: "\n").last.map(String.init) ?? "[]"

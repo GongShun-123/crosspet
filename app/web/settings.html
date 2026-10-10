@@ -42,6 +42,7 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 .seg button.on { background: var(--accent); color: #fff; }
 .tag { font-size: 11px; padding: 0 7px; border-radius: 9px; background: var(--hover); color: var(--muted); white-space: nowrap; }
 .tag.ok { color: var(--ok); }
+.item .label small.warn { color: #c0392b; }
 .hidden { display: none !important; }
 #toast { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 6px 14px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90%; }
 #toast.show { opacity: .92; }
@@ -151,6 +152,20 @@ function setState(s) {
   renderIntegrations(s.integrations)
 }
 
+// 接上了但从没收到过这个 AI 的消息：多半是还没在它里面用过，或者某一步没生效。按 AI 给一句排查提示
+const NEVER_SEEN = {
+  'claude-hooks': '新开一个 Claude Code 会话、让它干点活试试',
+  'claude-mod': '新开一个会话试试；终端里的 Claude Code 要 2.1.287 以上，公司账号可能禁了 mod，可以改用标准钩子',
+  codex: '在 Codex 里用 /hooks 把 CrossPet 的钩子「信任」一次；如果 Codex 在 WSL 里跑、或者改过 CODEX_HOME，暂时接不上',
+  deepseek: '完全退出 DeepSeek Harness（Windows 包括托盘图标）再打开',
+  gemini: '新开一个 Gemini CLI 会话试试',
+  antigravity: '重开 Antigravity 试试（需要 2.0 以上）',
+  workbuddy: '重开 WorkBuddy、开个新对话试试',
+  zcode: '新开一个 ZCode 会话试试',
+  hermes: '新开一个 Hermes 会话试试',
+}
+const agoText = s => s < 60 ? '刚刚' : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : s < 86400 ? `${Math.floor(s / 3600)} 小时前` : `${Math.floor(s / 86400)} 天前`
+
 function renderIntegrations(list) {
   $('integrateCard').classList.toggle('hidden', !list)
   if (!list) return
@@ -158,8 +173,11 @@ function renderIntegrations(list) {
     const row = document.createElement('div'); row.className = 'item'
     row.innerHTML = `<div class="label"></div><div class="ctl"><span class="tag"></span><button data-i="install"></button><button data-i="uninstall">撤销</button></div>`
     row.querySelector('.label').textContent = i.label
-    if (i.note) { const n = document.createElement('small'); n.textContent = i.note; row.querySelector('.label').appendChild(n) }
-    const tag = row.querySelector('.tag'); tag.textContent = i.installed ? '已接入' : '未接入'; tag.classList.toggle('ok', i.installed)
+    const never = i.installed && (i.lastSeen === null || i.lastSeen === undefined) && 'lastSeen' in i
+    const note = never ? `还没收到过它的消息：${NEVER_SEEN[i.id] || '用一下它试试'}`
+      : i.installed && typeof i.lastSeen === 'number' ? `${i.note ? i.note + '；' : ''}上次收到消息：${agoText(i.lastSeen)}` : i.note
+    if (note) { const n = document.createElement('small'); n.textContent = note; if (never) n.className = 'warn'; row.querySelector('.label').appendChild(n) }
+    const tag = row.querySelector('.tag'); tag.textContent = i.installed ? (never ? '已接入 · 没动静' : '已接入') : '未接入'; tag.classList.toggle('ok', i.installed && !never)
     const install = row.querySelector('[data-i=install]'); install.textContent = i.installed ? '更新' : '接入'
     const uninstall = row.querySelector('[data-i=uninstall]'); uninstall.disabled = !i.installed
     for (const b of [install, uninstall]) b.onclick = () => {

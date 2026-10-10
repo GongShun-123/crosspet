@@ -333,6 +333,8 @@ def codex(install: bool) -> None:
         if not found(CODEX_HOOKS.parent, "Codex", ("hooks.json",)):
             return
         merge_hooks(CODEX_HOOKS, REPO / "integrations/codex/hooks.json")
+        for w in codex_warnings():
+            print("  ！" + w)
         print("  → 下次打开 Codex 时要审查并「信任」这些钩子（CLI 里用 /hooks），之后才会生效")
     else:
         remove_hooks(CODEX_HOOKS)
@@ -828,6 +830,198 @@ def installed() -> list:
     return result
 
 
+# ---- 诊断（反馈时附带）----
+# 一次把能想到的接入信息都列出来，不用遇到一个问题再加一项：每个 AI 的配置在哪、在不在、CrossPet 的条目在不在、
+# 最近一次收到它的消息是什么时候、相关的环境变量、Codex 可能在 WSL 里 / CODEX_HOME 只在终端里设了……
+# 只有路径、有没有、时间和版本号，不读对话、不带任何 Key / 令牌（用户目录换成 ~）
+STATE_DIR = Path(os.environ.get("CROSSPET_STATE_DIR") or (str(SUPPORT / "state") if os.name == "nt" else "/tmp/crosspet"))
+SEEN_KEY = {"claude-hooks": "claude", "claude-mod": "claude-mod", "codex": "gpt", "deepseek": "deepseek", "gemini": "gemini",
+            "antigravity": "antigravity", "workbuddy": "workbuddy", "zcode": "zcode", "hermes": "hermes"}
+
+
+def short(p) -> str:
+    s = str(p)
+    h = str(HOME)
+    return "~" + s[len(h):] if s.startswith(h) else s
+
+
+def ago(ts: float) -> str:
+    d = time.time() - ts
+    if d < 0:
+        return "刚刚"
+    for unit, n in (("天", 86400), ("小时", 3600), ("分钟", 60)):
+        if d >= n:
+            return f"{int(d // n)} {unit}前"
+    return f"{int(d)} 秒前"
+
+
+def seen(target: str) -> str:
+    f = STATE_DIR / f"seen-{SEEN_KEY[target]}"
+    try:
+        return ago(float(f.read_text().strip() or f.stat().st_mtime))
+    except Exception:
+        return "没有记录"
+
+
+def file_state(p: Path, marker_ok=None) -> str:
+    if not p.exists():
+        return f"{short(p)}（不存在）"
+    try:
+        size = p.stat().st_size
+        mtime = ago(p.stat().st_mtime)
+    except OSError:
+        return f"{short(p)}（读不了）"
+    extra = ""
+    if marker_ok is not None:
+        try:
+            extra = "，有 CrossPet 条目" if marker_ok() else "，**没有** CrossPet 条目"
+        except Exception as e:
+            extra = f"，解析失败：{type(e).__name__}"
+    return f"{short(p)}（{size} 字节，{mtime}改过{extra}）"
+
+
+def env_line(*names) -> str:
+    vals = [f"{n}={short(os.environ[n])}" for n in names if os.environ.get(n)]
+    return "，".join(vals) if vals else "无"
+
+
+def shell_profile_mentions(name: str) -> list:
+    """终端配置文件里有没有设这个变量（设了但 CrossPet 进程看不到，说明只在终端里生效）"""
+    cands = [HOME / f for f in (".zshrc", ".zprofile", ".bashrc", ".bash_profile", ".profile", ".config/fish/config.fish")]
+    if os.name == "nt":
+        docs = HOME / "Documents"
+        cands += [docs / "PowerShell/Microsoft.PowerShell_profile.ps1", docs / "WindowsPowerShell/Microsoft.PowerShell_profile.ps1"]
+    hits = []
+    for f in cands:
+        try:
+            if f.exists() and name in f.read_text(encoding="utf-8", errors="ignore"):
+                hits.append(short(f))
+        except OSError:
+            pass
+    return hits
+
+
+def wsl_codex_homes() -> list:
+    """Windows：WSL 里有没有 ~/.codex（Codex 命令行很多人在 WSL 里用，那边的配置 CrossPet 接不上）"""
+    if os.name != "nt":
+        return []
+    import subprocess
+    try:
+        out = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=8).stdout
+        distros = [d.strip() for d in out.decode("utf-16-le", errors="ignore").replace("\x00", "").splitlines() if d.strip()]
+    except Exception:
+        return []
+    found_ = []
+    for d in distros:
+        for root in (Path(f"//wsl.localhost/{d}/home"), Path(f"//wsl$/{d}/home")):
+            try:
+                for u in root.iterdir():
+                    if (u / ".codex").is_dir():
+                        found_.append(f"{d}:~{u.name}/.codex" + ("（有 CrossPet 钩子）" if has_hooks(u / ".codex/hooks.json") else ""))
+                break
+            except OSError:
+                continue
+    return found_ or [f"装了 WSL（{', '.join(distros)}），里面没找到 .codex"] if distros else []
+
+
+def codex_warnings() -> list:
+    """接入 Codex 时的提醒：配置可能不在 CrossPet 写的地方"""
+    warn = []
+    if not os.environ.get("CODEX_HOME"):
+        hits = shell_profile_mentions("CODEX_HOME")
+        if hits:
+            warn.append(f"你在终端配置（{'、'.join(hits)}）里设了 CODEX_HOME，但 CrossPet 读不到，钩子写在了默认的 {short(CODEX_HOOKS.parent)}。"
+                        "请把 CODEX_HOME 设成系统环境变量（macOS 用 launchctl setenv，Windows 在「系统属性 → 环境变量」里加），再重新接入")
+    wsl = [w for w in wsl_codex_homes() if ".codex" in w and "没找到" not in w]
+    if wsl:
+        warn.append(f"WSL 里也有 Codex 的配置（{'、'.join(wsl)}）。如果你是在 WSL 里用 Codex，CrossPet 暂时接不上，桌宠不会跟着动")
+    return warn
+
+
+def diagnose() -> str:
+    import platform
+    L = [f"接入工具：Python {platform.python_version()}（{short(sys.executable)}），数据目录 {short(SUPPORT)}，状态目录 {short(STATE_DIR)}"]
+    inst = installed()
+    L.append(f"已接入：{', '.join(inst) or '无'}；想一直接着：{', '.join(sorted(wanted())) or '无'}")
+    # Claude
+    L.append(f"[Claude] 配置目录 {short(CLAUDE_HOME)}（{'在' if CLAUDE_HOME.exists() else '不在'}），环境变量 {env_line('CLAUDE_CONFIG_DIR')}")
+    L.append(f"  settings.json：{file_state(CLAUDE_SETTINGS, lambda: has_hooks(CLAUDE_SETTINGS) or claude_mod_ok())}；标准钩子 {'有' if has_hooks(CLAUDE_SETTINGS) else '无'}，"
+             f"mod 文件夹 {'在' if CLAUDE_MOD_DIR.exists() else '不在'}、加载路径里 {'有' if claude_mod_ok() else '没有'}")
+    try:
+        env = load_json(CLAUDE_SETTINGS).get("env", {})
+        base = env.get("ANTHROPIC_BASE_URL", "")
+        host = re.sub(r"^https?://([^/]+).*$", r"\1", base) if base else "默认"
+        L.append(f"  settings 里的接口：{host}，模型 {env.get('ANTHROPIC_MODEL', '默认')}")
+    except Exception:
+        pass
+    v = claude_cli_version()
+    L.append(f"  终端 claude 版本 {'.'.join(map(str, v)) if v else '没找到'}；最近消息：标准钩子 {seen('claude-hooks')}，mod {seen('claude-mod')}")
+    if (HOME / ".cc-switch").exists():
+        L.append("  装了 CC Switch")
+    # Codex
+    L.append(f"[Codex] hooks.json：{file_state(CODEX_HOOKS, lambda: has_hooks(CODEX_HOOKS))}；目录里其他文件 {'有' if found(CODEX_HOOKS.parent, '', ('hooks.json',), quiet=True) else '没有（Codex 可能没在这里运行过）'}")
+    L.append(f"  config.toml {'在' if (CODEX_HOOKS.parent / 'config.toml').exists() else '不在'}；环境变量 {env_line('CODEX_HOME')}；终端配置里设了 CODEX_HOME：{'、'.join(shell_profile_mentions('CODEX_HOME')) or '无'}")
+    w = wsl_codex_homes()
+    if w:
+        L.append(f"  WSL：{'；'.join(w)}")
+    L.append(f"  最近消息：{seen('codex')}")
+    # DeepSeek
+    patch = DSH_PROFILE / "cordis.patch.yml"
+    L.append(f"[DeepSeek Harness] profile {short(DSH_PROFILE)}（{'在' if DSH_PROFILE.exists() else '不在'}），环境变量 {env_line('DSH_HOME', 'DSH_PROFILE', 'DSH_PROFILE_DIR')}")
+    L.append(f"  cordis.patch.yml：{file_state(patch, lambda: DSH_BLOCK_START in patch.read_text(encoding='utf-8'))}；"
+             f"插件 {'在' if (DSH_PLUGIN_DIR / 'lib/index.js').exists() else '不在'}，链接 {'在' if (DSH_PROFILE / 'node_modules/@local/dsh-plugin-crosspet').exists() else '不在'}")
+    try:
+        ver = re.search(r'PLUGIN_VERSION = "([^"]+)"', (DSH_PLUGIN_DIR / "lib/index.js").read_text(encoding="utf-8")).group(1)
+        L.append(f"  插件版本 {ver}")
+    except Exception:
+        pass
+    try:
+        diag = json.loads((STATE_DIR / "deepseek-plugin.json").read_text(encoding="utf-8"))
+        L.append(f"  插件自检：{json.dumps(diag, ensure_ascii=False)}")
+    except Exception:
+        pass
+    L.append(f"  最近消息：{seen('deepseek')}")
+    # 其他
+    L.append(f"[Gemini CLI] {file_state(GEMINI_SETTINGS, lambda: has_hooks(GEMINI_SETTINGS))}；最近消息 {seen('gemini')}")
+    L.append(f"[Antigravity] {file_state(ANTIGRAVITY_HOOKS, has_antigravity)}；最近消息 {seen('antigravity')}")
+    for d in workbuddy_dirs():
+        if d.exists():
+            L.append(f"[WorkBuddy] {file_state(d / 'settings.json', lambda d=d: has_hooks(d / 'settings.json'))}")
+    L.append(f"  WorkBuddy 最近消息 {seen('workbuddy')}；环境变量 {env_line('WORKBUDDY_CONFIG_DIR')}")
+    L.append(f"[ZCode] {file_state(ZCODE_CONFIG, has_zcode)}；最近消息 {seen('zcode')}")
+    hermes_on = HERMES_CONFIG.exists() and re.search(r"^\s+-\s*crosspet\s*$", HERMES_CONFIG.read_text(encoding="utf-8"), re.M)
+    L.append(f"[Hermes] {short(HERMES_HOME)}（{'在' if HERMES_HOME.exists() else '不在'}），插件 {'在' if has_hermes() else '不在'}，"
+             f"config.yaml 里启用 {'是' if hermes_on else '否'}；"
+             f"环境变量 {env_line('HERMES_HOME')}；最近消息 {seen('hermes')}")
+    # 状态文件：各角色最近一次的状态
+    states = []
+    for f in sorted(STATE_DIR.glob("*-state.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            states.append(f"{f.name[:-11]}={d.get('pose')}/{d.get('event')}（{ago(f.stat().st_mtime)}）")
+        except Exception:
+            states.append(f"{f.name[:-11]}=读不了")
+    L.append(f"[状态] {'；'.join(states) or '状态目录里没有状态文件'}")
+    hosts = []
+    for f in sorted(STATE_DIR.glob("*-host.json")):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            hosts.append(f"{f.name[:-10]}→{d.get('character')}（{d.get('model') or '-'}，{ago(f.stat().st_mtime)}）")
+        except Exception:
+            pass
+    if hosts:
+        L.append(f"[按模型换角色] {'；'.join(hosts)}")
+    try:
+        auto = (STATE_DIR / "autostart.txt").read_text(encoding="utf-8-sig").strip().splitlines()[-3:]
+        L.append("[自动出现] " + " | ".join(auto))
+    except Exception:
+        pass
+    flags = [f for f in ("user-quit", "ai-autostart-off") if (SUPPORT / f).exists()]
+    if flags:
+        L.append(f"[标记] {', '.join(flags)}")
+    return "\n".join(L)
+
+
 def status() -> None:
     print("Claude Code 标准钩子:", "已接入" if has_hooks(CLAUDE_SETTINGS) else "未接入")
     print("Claude Code mod     :", "已接入" if claude_mod_ok() else "被别的工具改掉了（桌宠开着时会自动接回去）" if CLAUDE_MOD_DIR.exists() else "未接入")
@@ -842,7 +1036,12 @@ def status() -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2 and sys.argv[1] == "installed":  # 给设置窗口用：已接入的目标，JSON 数组
+    if len(sys.argv) == 2 and sys.argv[1] == "diagnose":   # 给反馈用：接入诊断（纯文本）
+        try:
+            print(diagnose())
+        except Exception as e:
+            print(f"诊断出错：{type(e).__name__}: {e}")
+    elif len(sys.argv) == 2 and sys.argv[1] == "installed":  # 给设置窗口用：已接入的目标，JSON 数组
         print(json.dumps(installed()))
     elif len(sys.argv) == 2 and sys.argv[1] == "status":
         status()
