@@ -207,6 +207,35 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     func checkForUpdate(manual: Bool) {
+        // 装的是测试版：也收下一个测试版。releases/latest 不含测试版，改看发布页的订阅源（releases.atom，不限流），
+        // 在比现在新的版本里挑最新、且 macOS 安装包真的在的（测试版发布页删了、标签还留着的不算）；没有就照常查正式版
+        if currentVersion.contains("-"), let feed = URL(string: "https://github.com/\(repoSlug)/releases.atom") {
+            URLSession.shared.dataTask(with: URLRequest(url: feed, timeoutInterval: 15)) { [weak self] data, _, _ in
+                guard let self else { return }
+                let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                let re = try? NSRegularExpression(pattern: "/releases/tag/([^\"<]+)")
+                let tags = Set((re?.matches(in: text, range: NSRange(text.startIndex..., in: text)) ?? []).compactMap { m in
+                    Range(m.range(at: 1), in: text).map { String(text[$0]) } })
+                let newer = tags.filter { self.isNewer($0, than: self.currentVersion) }.sorted { self.isNewer($0, than: $1) }
+                self.firstWithAsset(newer) { tag in
+                    if let tag { self.gotLatest(tag, page: URL(string: "https://github.com/\(self.repoSlug)/releases/tag/\(tag)"), manual: manual) }
+                    else { self.checkStable(manual: manual) }
+                }
+            }.resume()
+            return
+        }
+        checkStable(manual: manual)
+    }
+    /// 依次看这些版本的 macOS 安装包在不在，回调第一个在的（都不在就 nil）
+    func firstWithAsset(_ tags: [String], done: @escaping (String?) -> Void) {
+        guard let tag = tags.first, let url = URL(string: "https://github.com/\(repoSlug)/releases/download/\(tag)/CrossPet-macOS.zip") else { done(nil); return }
+        var req = URLRequest(url: url, timeoutInterval: 15); req.httpMethod = "HEAD"
+        URLSession.shared.dataTask(with: req) { [weak self] _, res, _ in
+            if ((res as? HTTPURLResponse)?.statusCode ?? 0) == 200 { done(tag) } else { self?.firstWithAsset(Array(tags.dropFirst()), done: done) }
+        }.resume()
+    }
+
+    func checkStable(manual: Bool) {
         guard let url = URL(string: "https://api.github.com/repos/\(repoSlug)/releases/latest") else { return }
         var req = URLRequest(url: url, timeoutInterval: 15)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
@@ -272,6 +301,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
         env["CROSSPET_CONNECT"] = "none"   // 只刷新已经接入的，不问新的
+        if let tag = latestRelease?.tag { env["CROSSPET_TAG"] = tag }   // 装检查到的那个版本（测试版用户会是下一个测试版）
         env["CROSSPET_PREFER_DIR"] = Bundle.main.bundleURL.deletingLastPathComponent().standardizedFileURL.path  // 装回原来的位置
         // 下载进度：安装命令把 curl 的进度条写进这个文件，这边每半秒读一次，在气泡里显示百分比
         let progressURL = FileManager.default.temporaryDirectory.appendingPathComponent("crosspet-update-progress.txt")

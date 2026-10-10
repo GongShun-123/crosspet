@@ -12,6 +12,7 @@
 #   CROSSPET_CONNECT="codex,claude-mod"   不逐个问，直接接入这些（all = 全部，none = 都不接）
 #   CROSSPET_APP_DIR=/path                 装到别的文件夹（这时不会关掉正在运行的 CrossPet，也不动别处的旧版）
 #   CROSSPET_NO_OPEN=1                     装完不自动打开
+#   CROSSPET_TAG=v1.4.0-beta.2             装指定版本（测试版用户在 App 里一键更新到下一个测试版时用）；不设就是最新正式版
 set -euo pipefail
 
 REPO_SLUG="lokicorvus/crosspet"
@@ -73,7 +74,7 @@ fi
 [ "$ACTION" = "install" ] || die "不认识的参数：${ACTION}（可以用 install 或 uninstall）"
 
 bold "1/3 下载最新版"
-TAG=$(latest_tag)
+TAG=${CROSSPET_TAG:-$(latest_tag)}
 [ -n "$TAG" ] || die "查不到最新版本，检查一下网络。"
 echo "最新版本：$TAG"
 # 1.2.2 起 macOS 包叫 CrossPet-macOS.zip（和 CrossPet-Windows.zip 区分开）；没有就是旧版本，用原来的名字

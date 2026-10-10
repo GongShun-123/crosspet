@@ -1317,13 +1317,18 @@ namespace CrossPet
         {
             try
             {
+                Dictionary<string, object> body = null;
+                string tag = null;
+                var fromPage = false;
+                // 装的是测试版：也收下一个测试版（releases/latest 不含测试版）。看发布页订阅源，挑比现在新、Windows 安装包真的在的最新一个
+                if (Store.Version.Contains("-")) { tag = await NewerFromFeed(); fromPage = tag != null; }
+                if (tag == null)
+                {
                 var req = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{Repo}/releases/latest");
                 req.Headers.UserAgent.ParseAdd("CrossPet/" + Store.Version);
                 var res = await http.SendAsync(req);
-                Dictionary<string, object> body = null;
                 try { body = Store.Json.DeserializeObject(await res.Content.ReadAsStringAsync()) as Dictionary<string, object>; } catch { }
-                var tag = body != null && body.TryGetValue("tag_name", out var t) ? t as string : null;
-                var fromPage = false;
+                tag = body != null && body.TryGetValue("tag_name", out var t) ? t as string : null;
                 if (tag == null)
                 {
                     // 接口限流（同一个网络每小时 60 次）或者返回了报错：改看网页 releases/latest 跳转到哪个版本（不限流，get.sh 也这么查）
@@ -1332,6 +1337,7 @@ namespace CrossPet
                     var final = page.RequestMessage?.RequestUri?.AbsolutePath ?? "";
                     var i = final.LastIndexOf("/tag/", StringComparison.Ordinal);
                     if (i >= 0) { tag = Uri.UnescapeDataString(final.Substring(i + 5)); fromPage = true; }
+                }
                 }
                 if (tag != null && Newer(tag, Store.Version))
                 {
@@ -1423,6 +1429,27 @@ namespace CrossPet
         }
 
         /// <summary>语义化版本比较：先比 主.次.补丁；一样时正式版比测试版新（1.2.4 &lt; 1.2.5-beta.1 &lt; 1.2.5-beta.2 &lt; 1.2.5）</summary>
+        /// <summary>发布页订阅源（releases.atom，含测试版、不限流）里比现在新、Windows 安装包在的最新版本；没有返回 null。
+        /// 测试版发布页删了、标签还留着的，订阅源里也有，所以要看安装包在不在</summary>
+        async Task<string> NewerFromFeed()
+        {
+            try
+            {
+                var text = await http.GetStringAsync($"https://github.com/{Repo}/releases.atom");
+                var tags = System.Text.RegularExpressions.Regex.Matches(text, "/releases/tag/([^\"<]+)").Cast<System.Text.RegularExpressions.Match>()
+                    .Select(m => Uri.UnescapeDataString(m.Groups[1].Value)).Distinct().Where(t => Newer(t, Store.Version)).ToList();
+                tags.Sort((x, y) => Newer(x, y) ? -1 : Newer(y, x) ? 1 : 0);
+                foreach (var t in tags)
+                {
+                    var head = new HttpRequestMessage(HttpMethod.Head, $"https://github.com/{Repo}/releases/download/{t}/CrossPet-Windows.zip");
+                    var r = await http.SendAsync(head);
+                    if (r.IsSuccessStatusCode) return t;
+                }
+            }
+            catch (Exception e) { Store.Log("检查测试版更新失败: " + e.Message); }
+            return null;
+        }
+
         public static bool Newer(string tag, string cur)
         {
             (int[] core, string[] pre) P(string v)
