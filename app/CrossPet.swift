@@ -145,6 +145,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(appActivated(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(spaceChanged(_:)),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         // 看不见时停动画：窗口被完全挡住、屏幕休眠、锁屏（锁屏时会话失活）
         NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: panel, queue: .main) { [weak self] _ in self?.updatePageHidden() }
         let ws = NSWorkspace.shared.notificationCenter
@@ -480,7 +483,14 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     /// 切到某个 AI 的 App 后，要在它上面停留一会儿才换角色：
     /// App 启动时窗口会短暂地抢焦点、让焦点，立即响应会来回闪。
+    @objc func spaceChanged(_ note: Notification) {
+        fullscreenOverride = false
+        // 进全屏的动画要一会儿，窗口大小稳定了再看
+        for delay in [0.1, 0.8] { DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.checkFullscreen() } }
+    }
+
     @objc func appActivated(_ note: Notification) {
+        spaceChanged(note)
         guard ready, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         pendingSwitch?.cancel()
         guard followApps, let bundle = app.bundleIdentifier, let mapped = appToCharacter[bundle] ?? hostApp(bundle) else { return }
@@ -828,6 +838,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     @objc func bringToFront() {
         let visible = NSScreen.screens.contains { $0.visibleFrame.intersects(panel.frame.insetBy(dx: 40, dy: 40)) }
         if !visible { resetPosition() }
+        fullscreenOverride = true; hiddenForFullscreen = false   // 你主动叫她：全屏时也出来（切换空间 / 前台程序后再按规则收起来）
         panel.orderFrontRegardless()
         js("handleClick('pat')")
     }
@@ -971,6 +982,8 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     func applyLayer() {
+        if Date().timeIntervalSince(fullscreenCheckedAt) >= 1 { checkFullscreen() }
+        if hiddenForFullscreen { return }   // 全屏时收着：别被换层级的逻辑翻出来
         let top = layerMode == "always" || (layerMode == "ai" && aiActive)
         let level: NSWindow.Level = top ? .floating : .normal
         guard panel.level != level else { return }
@@ -1188,6 +1201,63 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     func applyFullscreenBehavior() {
         panel.collectionBehavior = hideInFullscreen ? [.canJoinAllSpaces, .stationary] : [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        checkFullscreen()
+    }
+
+    // 全屏时隐藏：光靠上面的 collectionBehavior 不够（「所有空间都显示」的浮动面板照样会盖在全屏程序上），
+    // 所以自己看：桌宠所在的那块屏幕上，前台程序有没有一个盖满整块屏幕的窗口（全屏程序、全屏视频、演示）。
+    // 有就收起来，退出全屏再放回来。只看窗口位置和大小，不需要录屏权限；每秒看一次，切换空间 / 前台程序时马上看
+    var hiddenForFullscreen = false
+    var fullscreenCheckedAt = Date.distantPast
+    var fullscreenOverride = false   // 全屏时你点菜单栏图标叫她出来：切换空间 / 前台程序之前不再收起来
+    func checkFullscreen() {
+        fullscreenCheckedAt = Date()
+        let full = hideInFullscreen && !fullscreenOverride && frontIsFullscreen()
+        guard full != hiddenForFullscreen else { return }
+        hiddenForFullscreen = full
+        if full {
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
+            if layerMode != "always" { orderBelowFrontWindow() }
+        }
+    }
+    func frontIsFullscreen() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              let screen = panel.screen ?? NSScreen.main, let primary = NSScreen.screens.first,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        // NSScreen 是左下角原点，窗口列表是主屏左上角原点
+        let f = screen.frame
+        let t = CGRect(x: f.minX, y: primary.frame.maxY - f.maxY, width: f.width, height: f.height)
+        let near = { (a: CGFloat, b: CGFloat) in abs(a - b) < 2 }
+        func rect(_ w: [String: Any]) -> CGRect? {
+            guard let b = w[kCGWindowBounds as String] as? [String: CGFloat], let x = b["X"], let y = b["Y"], let wd = b["Width"], let h = b["Height"] else { return nil }
+            return CGRect(x: x, y: y, width: wd, height: h)
+        }
+        let pid = { (w: [String: Any]) in w[kCGWindowOwnerPID as String] as? Int32 }
+        let layer = { (w: [String: Any]) in w[kCGWindowLayer as String] as? Int ?? -1 }
+        // 前台程序的普通窗口：左右铺满、底边到屏幕底。有刘海的屏幕全屏时顶上会让出刘海那一条（约 37 点）
+        let topSlack = max(screen.safeAreaInsets.top, 24) + 16   // 实测：刘海安全区 32，全屏窗口让出 37；后面还有一道确认，这里放宽
+        var exact = false, fills = false
+        for w in list where pid(w) == app.processIdentifier && layer(w) == 0 {
+            guard let r = rect(w), near(r.minX, t.minX), near(r.width, t.width), near(r.maxY, t.maxY) else { continue }
+            if near(r.minY, t.minY) { exact = true } else if r.minY - t.minY <= topSlack { fills = true }
+        }
+        if exact { return true }
+        guard fills else { return false }
+        // 顶上让出了刘海：再确认真的是全屏（不是 Dock 自动隐藏时的最大化窗口）——
+        // 全屏时前台程序在屏幕顶上有一条同宽的高层窗口（隐藏起来的标题栏），而平时铺满屏幕的程序坞窗口不在了
+        let strip = list.contains { w in
+            guard pid(w) == app.processIdentifier, layer(w) > 0, let r = rect(w) else { return false }
+            return near(r.minX, t.minX) && near(r.minY, t.minY) && near(r.width, t.width) && r.height <= 80
+        }
+        let dockPid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
+        let dockOverlay = list.contains { w in
+            guard dockPid != nil, pid(w) == dockPid, let r = rect(w) else { return false }
+            return near(r.minX, t.minX) && near(r.minY, t.minY) && near(r.width, t.width) && near(r.height, t.height)
+        }
+        return strip || !dockOverlay
     }
 
     // MARK: 设置
