@@ -76,6 +76,8 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
     <div class="ctl"><input type="text" id="name" maxlength="40"><button id="saveName">保存</button></div></div>
   <div class="item"><div class="label">跟随前台 AI 应用<small>切到哪个 AI 的 App，就换成哪个角色</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="followApps"><span></span></label></div></div>
+  <div class="item hidden" data-only="hotkeys"><div class="label">隐藏 / 显示的快捷键<small id="hotkeyNote">按一下藏起来，再按一下出来；也可以点菜单栏的爪印（Windows 双击托盘图标）叫她出来</small></div>
+    <div class="ctl"><select id="hideHotkey" aria-label="隐藏快捷键"></select></div></div>
   <div class="item"><div class="label">省电模式<small>身边的小特效刷新慢一点、闲着时更快停下；人物动作照旧。笔记本用电池时可以打开</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="powerSave"><span></span></label></div></div>
   <div class="item"><div class="label">随机彩蛋<small>偶尔有别的角色冒出来捣乱；关掉后右键「召唤彩蛋」还能手动看</small></div>
@@ -149,6 +151,12 @@ function setState(s) {
   const cur = s.characters.find(c => c.id === s.character)
   if (document.activeElement !== $('name')) { $('name').value = cur?.custom || ''; $('name').placeholder = cur?.defaultName || '' }
   if (s.loginNote) $('loginLabel').innerHTML = `登录时自动启动<small>${s.loginNote}</small>`
+  if (s.hotkeys) {
+    $('hideHotkey').replaceChildren(...s.hotkeys.map(h => new Option(h.label, h.id, false, h.id === s.hideHotkey)))
+    const n = $('hotkeyNote')
+    n.textContent = s.hotkeyFailed ? '这个快捷键被别的程序占用了，换一个试试' : '按一下藏起来，再按一下出来；也可以点菜单栏的爪印（Windows 双击托盘图标）叫她出来'
+    n.classList.toggle('warn', !!s.hotkeyFailed)
+  }
   renderIntegrations(s.integrations)
 }
 
@@ -196,6 +204,7 @@ for (const b of $('aura').children) b.onclick = () => post({ cmd: 'set', key: 'a
 for (const b of document.querySelectorAll('[data-action]')) b.onclick = () => post({ cmd: 'action', name: b.dataset.action })
 $('size').oninput = () => { $('sizeVal').textContent = Math.round($('size').value * 100) + '%'; post({ cmd: 'set', key: 'size', value: +$('size').value }) }
 document.querySelector('[data-reset-size]').onclick = () => post({ cmd: 'set', key: 'size', value: 1 })
+$('hideHotkey').onchange = () => post({ cmd: 'set', key: 'hideHotkey', value: $('hideHotkey').value })
 $('character').onchange = () => {
   const [id, skin] = $('character').value.split('|')
   post(skin === undefined ? { cmd: 'set', key: 'character', value: id } : { cmd: 'skin', id, skin })

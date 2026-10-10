@@ -9,6 +9,7 @@
 //   /tmp/crosspet/      各 AI 接入写的状态：<id>-state.json、<id>-quota.json
 //
 // 交互：单击 = 摸摸头；拖动 = 移动；右键 = 菜单（戳一下 / 彩蛋 / 换角色 / 改名 / 设置 / 退出）
+import Carbon
 import Cocoa
 import ServiceManagement
 import WebKit
@@ -141,6 +142,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         panel.contentView = container
         panel.orderFrontRegardless()
         setupStatusItem()
+        registerHotKey()
 
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(appActivated(_:)),
@@ -799,9 +801,53 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             add(menu, "开发者控制台…", #selector(openDevConsole))
         }
         add(menu, "回到右下角", #selector(resetPosition))
+        add(menu, hotkeyLabel.map { "暂时隐藏（\($0)）" } ?? "暂时隐藏", #selector(toggleHidden))
         menu.addItem(.separator())
         add(menu, "退出 CrossPet", #selector(quit))
         return menu
+    }
+
+    // MARK: 快捷键隐藏
+    // 全局快捷键（默认 ⌃⌥P）：按一下藏起来，再按一下出来；点菜单栏爪印也能叫出来。藏着时 AI 干活也不出来，重开 App 恢复显示。
+    // 用 Carbon 的 RegisterEventHotKey：系统级快捷键，不需要「辅助功能」权限
+    var userHidden = false
+    var hotKeyRef: EventHotKeyRef?
+    var hotKeyHandlerInstalled = false
+    static let hotkeyChoices: [(id: String, label: String, key: UInt32)] = [("p", "⌃⌥P", UInt32(kVK_ANSI_P)), ("h", "⌃⌥H", UInt32(kVK_ANSI_H))]
+    var hideHotkey: String { defaults.string(forKey: "hideHotkey") ?? "p" }
+    var hotkeyLabel: String? { Self.hotkeyChoices.first { $0.id == hideHotkey }?.label }
+    var hotkeyFailed = false
+
+    func registerHotKey() {
+        if let r = hotKeyRef { UnregisterEventHotKey(r); hotKeyRef = nil }
+        hotkeyFailed = false
+        guard let choice = Self.hotkeyChoices.first(where: { $0.id == hideHotkey }) else { return }
+        if !hotKeyHandlerInstalled {
+            hotKeyHandlerInstalled = true
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            InstallEventHandler(GetApplicationEventTarget(), { _, _, data in
+                guard let data else { return noErr }
+                let app = Unmanaged<App>.fromOpaque(data).takeUnretainedValue()
+                DispatchQueue.main.async { app.toggleHidden() }
+                return noErr
+            }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
+        }
+        let id = EventHotKeyID(signature: OSType(0x43505431), id: 1)   // 'CPT1'
+        let status = RegisterEventHotKey(choice.key, UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        hotkeyFailed = status != noErr   // 被别的程序占了
+    }
+
+    @objc func toggleHidden() { setUserHidden(!userHidden) }
+    func setUserHidden(_ hidden: Bool) {
+        userHidden = hidden
+        if hidden {
+            panel.orderOut(nil)
+        } else {
+            fullscreenOverride = true; hiddenForFullscreen = false   // 你主动叫她：全屏时也先出来
+            panel.orderFrontRegardless()
+            if layerMode == "normal" { orderBelowFrontWindow() }
+        }
+        updatePageHidden()
     }
 
     // MARK: 菜单栏图标
@@ -840,6 +886,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     @objc func bringToFront() {
         let visible = NSScreen.screens.contains { $0.visibleFrame.intersects(panel.frame.insetBy(dx: 40, dy: 40)) }
         if !visible { resetPosition() }
+        userHidden = false
         fullscreenOverride = true; hiddenForFullscreen = false   // 你主动叫她：全屏时也出来（切换空间 / 前台程序后再按规则收起来）
         panel.orderFrontRegardless()
         js("handleClick('pat')")
@@ -986,6 +1033,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     func applyLayer() {
         // 每次轮询（0.3 秒）都看：程序一进全屏，窗口列表马上就是全屏后的大小，但「切换空间」的通知要等动画放完才来，
         // 只靠它和每秒一次的检查，她会在全屏动画上露一秒多（闪一下）
+        if userHidden { return }   // 你用快捷键藏起来了：什么都别把她翻出来
         if Date().timeIntervalSince(fullscreenCheckedAt) >= 0.25 { checkFullscreen() }
         if hiddenForFullscreen { return }   // 全屏时收着：别被换层级的逻辑翻出来
         let top = layerMode == "always" || (layerMode == "ai" && aiActive)
@@ -999,7 +1047,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         }
         web.evaluateJavaScript("sink()") { [weak self] _, _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                guard let self, self.layerMode == "always" || (self.layerMode == "ai" && self.aiActive) else { self?.js("surface()"); return }
+                guard let self, !self.userHidden, self.layerMode == "always" || (self.layerMode == "ai" && self.aiActive) else { self?.js("surface()"); return }
                 self.panel.level = .floating
                 self.panel.orderFrontRegardless()
                 self.js("surface()")
@@ -1025,7 +1073,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var screensAsleep = false
     func updatePageHidden() {
         guard ready else { return }
-        js("setPageHidden(\(screensAsleep || !panel.occlusionState.contains(.visible)))")
+        js("setPageHidden(\(screensAsleep || userHidden || !panel.occlusionState.contains(.visible)))")
     }
 
     func undock() {
@@ -1216,6 +1264,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var fullscreenOverride = false   // 全屏时你点菜单栏图标叫她出来：切换空间 / 前台程序之前不再收起来
     func checkFullscreen() {
         fullscreenCheckedAt = Date()
+        if userHidden { return }   // 你用快捷键藏起来的：全屏规则不管她
         let full = hideInFullscreen && !fullscreenOverride && frontIsFullscreen()
         guard full != hiddenForFullscreen else { return }
         hiddenForFullscreen = full
@@ -1339,6 +1388,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             "gptQuota": defaults.bool(forKey: "gptQuota"), "agyQuota": defaults.bool(forKey: "agyQuota"),
             "login": SMAppService.mainApp.status == .enabled,
             "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "powerSave": powerSave,
+            "hideHotkey": hideHotkey, "hotkeyFailed": hotkeyFailed, "hotkeys": [["id": "off", "label": "不用快捷键"]] + Self.hotkeyChoices.map { ["id": $0.id, "label": $0.label] },
             "aiAutostart": aiAutostart,
             "character": currentId ?? characterIds.first ?? "",
             "characters": characterIds.map { id -> [String: Any] in
@@ -1534,6 +1584,8 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                 if (value as? Bool ?? false) != defaults.bool(forKey: "gptQuota") { toggleGPTQuota() }
             case "agyQuota":
                 if (value as? Bool ?? false) != defaults.bool(forKey: "agyQuota") { toggleAntigravityQuota() }
+            case "hideHotkey":
+                if let v = value as? String { defaults.set(v, forKey: "hideHotkey"); registerHotKey() }
             case "powerSave":
                 let on = value as? Bool ?? false
                 defaults.set(on, forKey: "powerSave"); js("setPowerSave(\(on))")

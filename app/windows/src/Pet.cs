@@ -67,6 +67,8 @@ namespace CrossPet
                 hwnd = new WindowInteropHelper(Window).Handle;
                 Native.MakeToolWindow(hwnd);
                 RestorePosition();
+                HwndSource.FromHwnd(hwnd)?.AddHook(HotKeyHook);
+                RegisterHideHotKey();
             };
 
             grid = new Grid();
@@ -341,6 +343,7 @@ namespace CrossPet
         void ApplyLayer()
         {
             if (Window == null || hwnd == IntPtr.Zero) return;
+            if (userHidden) return;   // 你用快捷键藏起来了：什么都别把她翻出来
             // 全屏时隐藏
             var hide = HideFullscreen && !fullscreenOverride && Native.InFullscreen(hwnd);
             if (hide != hiddenForFullscreen)
@@ -674,11 +677,49 @@ namespace CrossPet
             Store.Settings["position"] = new Dictionary<string, object> { ["x"] = r.Left, ["y"] = r.Top };
             Store.SaveSettings();
         }
+        // ---------------- 快捷键隐藏 ----------------
+        // 全局快捷键（默认 Ctrl+Alt+P）：按一下藏起来，再按一下出来；双击托盘图标也能叫出来。藏着时 AI 干活也不出来，重开恢复显示
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint mods, uint vk);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+        const int HotKeyId = 0x4350;
+        static readonly (string id, string label, uint vk)[] HotkeyChoices = { ("p", "Ctrl+Alt+P", 0x50), ("h", "Ctrl+Alt+H", 0x48) };
+        static string HideHotkey => Store.Settings.TryGetValue("hideHotkey", out var v) && v is string s ? s : "p";
+        static string HotkeyLabel => HotkeyChoices.FirstOrDefault(h => h.id == HideHotkey).label;
+        bool userHidden, hotkeyFailed;
+        void RegisterHideHotKey()
+        {
+            if (hwnd == IntPtr.Zero) return;
+            UnregisterHotKey(hwnd, HotKeyId);
+            hotkeyFailed = false;
+            var choice = HotkeyChoices.FirstOrDefault(h => h.id == HideHotkey);
+            if (choice.id == null) return;
+            hotkeyFailed = !RegisterHotKey(hwnd, HotKeyId, 0x0001 | 0x0002 | 0x4000, choice.vk);   // Alt | Ctrl | 不连发
+            if (hotkeyFailed) Store.Log($"快捷键 {choice.label} 注册失败（被别的程序占用了）");
+        }
+        IntPtr HotKeyHook(IntPtr h, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == 0x0312 && wParam.ToInt32() == HotKeyId) { SetUserHidden(!userHidden); handled = true; }   // WM_HOTKEY
+            return IntPtr.Zero;
+        }
+        void SetUserHidden(bool hidden)
+        {
+            userHidden = hidden;
+            if (hidden) Window.Hide();
+            else
+            {
+                fullscreenOverride = true; hiddenForFullscreen = false;
+                Window.Show();
+                if (Window.Topmost) Native.BringToTop(hwnd);
+            }
+            Js($"setPageHidden({(hidden ? "true" : "false")})");
+        }
+
         public void Recenter()
         {
             Undock();
             Store.Settings.Remove("position"); Store.SaveSettings();
             RestorePosition();
+            if (userHidden) SetUserHidden(false);   // 快捷键藏起来的：一起恢复（包括动画）
             fullscreenOverride = true; hiddenForFullscreen = false;   // 你主动叫她：全屏时也出来，前台窗口换了再按规则藏
             Window.Show();
             if (Window.Topmost) Native.BringToTop(hwnd);
@@ -735,6 +776,7 @@ namespace CrossPet
             menu.Items.Add(Item("反馈问题…", OpenFeedback));
             if (developer) menu.Items.Add(Item("开发者控制台…", OpenDev));
             menu.Items.Add(Item("回到右下角", Recenter));
+            menu.Items.Add(Item(HotkeyLabel != null ? $"暂时隐藏（{HotkeyLabel}）" : "暂时隐藏", () => SetUserHidden(true)));
             Sep();
             menu.Items.Add(Item("退出 CrossPet", UserQuit));
         }
@@ -888,7 +930,9 @@ namespace CrossPet
                 ["size"] = Scale, ["showName"] = ShowName, ["eggs"] = EggsEnabled, ["hideFullscreen"] = HideFullscreen, ["aura"] = AuraMode,
                 ["followApps"] = Store.Flag("followApps"), ["followEvents"] = Store.Flag("followEvents"),
                 ["gptQuota"] = Store.Flag("gptQuota"), ["agyQuota"] = Store.Flag("agyQuota"),
-                ["login"] = LoginEnabled, ["edgeDock"] = EdgeDockEnabled, ["dsQuota"] = DsQuotaEnabled, ["powerSave"] = PowerSave, ["aiAutostart"] = AIAutostart, ["character"] = current, ["updating"] = updating,
+                ["login"] = LoginEnabled, ["edgeDock"] = EdgeDockEnabled, ["dsQuota"] = DsQuotaEnabled, ["powerSave"] = PowerSave,
+                ["hideHotkey"] = HideHotkey, ["hotkeyFailed"] = hotkeyFailed,
+                ["hotkeys"] = new[] { new Dictionary<string, object> { ["id"] = "off", ["label"] = "不用快捷键" } }.Concat(HotkeyChoices.Select(h => new Dictionary<string, object> { ["id"] = h.id, ["label"] = h.label })).ToList(), ["aiAutostart"] = AIAutostart, ["character"] = current, ["updating"] = updating,
                 ["characters"] = Characters().Select(c =>
                 {
                     var d = new Dictionary<string, object>
@@ -934,6 +978,7 @@ namespace CrossPet
                             break;
                         case "showName": Store.Settings["showName"] = on; Store.SaveSettings(); Js($"setShowName({(on ? "true" : "false")})"); break;
                         case "hideFullscreen": Store.Settings["hideFullscreen"] = on; Store.SaveSettings(); ApplyLayer(); break;
+                        case "hideHotkey": if (value is string hk) { Store.Settings["hideHotkey"] = hk; Store.SaveSettings(); RegisterHideHotKey(); } break;
                         case "powerSave": Store.Settings["powerSave"] = on; Store.SaveSettings(); Js($"setPowerSave({(on ? "true" : "false")})"); break;
                         case "eggs": Store.Settings["eggs"] = on; Store.SaveSettings(); Js($"setEggsEnabled({(on ? "true" : "false")})"); break;
                         case "aura":
