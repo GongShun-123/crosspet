@@ -984,7 +984,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     func applyLayer() {
-        if Date().timeIntervalSince(fullscreenCheckedAt) >= 1 { checkFullscreen() }
+        // 每次轮询（0.3 秒）都看：程序一进全屏，窗口列表马上就是全屏后的大小，但「切换空间」的通知要等动画放完才来，
+        // 只靠它和每秒一次的检查，她会在全屏动画上露一秒多（闪一下）
+        if Date().timeIntervalSince(fullscreenCheckedAt) >= 0.25 { checkFullscreen() }
         if hiddenForFullscreen { return }   // 全屏时收着：别被换层级的逻辑翻出来
         let top = layerMode == "always" || (layerMode == "ai" && aiActive)
         let level: NSWindow.Level = top ? .floating : .normal
