@@ -635,11 +635,15 @@ def zcode(install: bool) -> None:
             ZCODE_FLAG.write_text("1")
             hooks["enabled"] = True
     else:
-        if ZCODE_FLAG.exists():   # 开关原本是关着的（或者没有）：还原
-            hooks["enabled"] = False
+        if ZCODE_FLAG.exists():   # 开关原本是关着的（或者没有）：还原。但你自己还有别的钩子时不关，免得把它们也停了
+            if not events:
+                hooks["enabled"] = False
             ZCODE_FLAG.unlink()
         if not events:
-            data.pop("hooks", None)   # 只剩 CrossPet 加的东西：整段拿掉
+            hooks.pop("events", None)
+        # 只剩 CrossPet 留下的东西（空的事件表、被我们关回去的开关）才整段拿掉；有别的设置一律保留
+        if set(hooks) <= {"enabled"} and hooks.get("enabled") is not True:
+            data.pop("hooks", None)
     if ZCODE_CONFIG.exists():
         backup(ZCODE_CONFIG)
     ZCODE_CONFIG.parent.mkdir(parents=True, exist_ok=True)
