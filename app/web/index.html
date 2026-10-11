@@ -629,7 +629,14 @@ function fxTick() {
   const now = performance.now()
   for (const s of document.querySelectorAll('#fx svg, #cards svg')) {
     if (s._fxT === undefined) { s.pauseAnimations(); s._fxT = s.getCurrentTime(); s._fxS = now }
-    s.setCurrentTime(s._fxT + (now - s._fxS) / 1000)
+    else if (!s.animationsPaused()) {
+      // 窗口藏起来再露出来（macOS 切换桌面、被挡住又露出）时，WebKit 会自己把暂停的 SVG 动画重新开起来：
+      // 它自己的时钟和这里按帧拨的时间交替生效，终端里的字一帧在一帧不见、zZz 错位（#9 @SkywingJam 发现并录屏对照）。
+      // 重新停住，从上一帧的时间接着走（也不跨过藏起来的那段）
+      s.pauseAnimations(); s._fxT = s._fxLast ?? s.getCurrentTime(); s._fxS = now
+    }
+    s._fxLast = s._fxT + (now - s._fxS) / 1000
+    s.setCurrentTime(s._fxLast)
   }
 }
 function applyFxRate() {
@@ -637,6 +644,8 @@ function applyFxRate() {
   $('fx').classList.toggle('rest', fxResting && pose !== 'sleeping' && !pageHidden)
   document.documentElement.classList.toggle('frozen', pageHidden)
   if (fps === fxFps && (fps === 0 || fxClock)) return
+  // 停过表（藏起来、闲着歇了）再开：从停下时的那一帧接着走，不一下子跳过停着的那段
+  if (fxFps <= 0 && fps > 0) { const now = performance.now(); for (const s of document.querySelectorAll('#fx svg, #cards svg')) if (s._fxLast !== undefined) { s._fxT = s._fxLast; s._fxS = now } }
   fxFps = fps
   clearInterval(fxClock); fxClock = null
   fxTick()   // 新出现的先接管（停住自己的时钟）
