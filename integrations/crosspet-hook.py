@@ -217,6 +217,24 @@ if character == "gpt":
     except (OSError, ValueError):
         pass
 
+# Codex 桌面版首页的「主动建议」：它在后台开临时对话翻你的文件、邮件、日历来写建议卡片，一打开 Codex、或者隔一阵就跑一次，
+# 不是你让它干的活，演了就是「啥都没输入她就开工」，还常常一次开两个、直接进手忙脚乱。
+# 这种临时对话不存档：你自己开的对话从一开始就有会话记录文件（事件里的 transcript_path），它们没有。
+# 刚开的对话记录文件可能晚一点点才写出来：开头两个事件等一下再判断
+if character == "gpt" and "transcript_path" in event:
+    tp = str(event.get("transcript_path") or "")
+    tries = 6 if event.get("hook_event_name") in ("SessionStart", "UserPromptSubmit") else 1
+    for i in range(tries):
+        try:
+            if tp and Path(tp).exists():
+                break
+        except (OSError, ValueError):
+            pass
+        if i + 1 < tries:
+            time.sleep(0.1)
+    else:
+        sys.exit(0)
+
 # 多模型宿主（WorkBuddy、ZCode、Hermes Agent）：每条事件都带当前模型名，按它选角色；认不出的模型（混元、Kimi、GLM……）
 # 写给「当前角色」（current），桌宠用正在显示的角色演，不换人。当前角色另外记在 <宿主>-host.json，
 # 桌宠切到这个程序的窗口时按它换角色
