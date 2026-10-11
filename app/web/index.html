@@ -827,6 +827,11 @@ function applyCharState(id, s) {
     }
     show('listening', true)
     thinkTimer = setTimeout(() => show('thinking'), LISTEN_TO_THINKING)
+  } else if (ev === 'Stop' && pendingCelebration[id]?.afterWork && !sulking && !angerLevel(angerNow())) {
+    // 干活途中额度刷新了（重置卡 / 换套餐 / 充值）：干完不演普通的开心，演 reset / 吃饭
+    clearTimeout(pending)
+    shownAt = 0
+    celebrate(id, pendingCelebration[id].ev)
   } else if (ev === 'Stop' && (s.pose === 'happy' || s.pose === 'proud') && !sulking && angerLevel(angerNow())) {
     // 干活时被甩、憋着的火还没消：干完不庆祝，直接按火气生气，说「干活时被你晃」的那套台词（秋后算账）
     clearTimeout(shakeEndTimer)
@@ -870,6 +875,8 @@ function quotaEvent(id, q) {
 }
 function celebrate(id, ev) {
   if (id !== charId || egg) { pendingCelebration[id] = { ev, at: Date.now() }; return }  // 等切到她时再演
+  // 正在干活：额度记录是 AI 回复的半路写下的，这时演会被紧跟着的干活动作盖掉，看不见——留到这一轮干完（Stop）再演
+  if (aiActivity() === 'work') { pendingCelebration[id] = { ev, at: Date.now(), afterWork: true }; return }
   delete pendingCelebration[id]
   const [own, fallback] = CELEBRATE[ev]
   const p = hasPose(own) ? own : fallback
