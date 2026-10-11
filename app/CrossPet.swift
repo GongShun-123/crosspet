@@ -585,8 +585,12 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     /// GPT 额度（可选，默认关）：读 ~/.codex/sessions 最新会话记录里最后一条 rate_limits，只取额度数字。
+    var lastGptQuota = "还没读过"
     func refreshGPTQuota() {
-        guard ready, defaults.bool(forKey: "gptQuota"), let q = codexQuota(),
+        guard ready, defaults.bool(forKey: "gptQuota") else { return }
+        let q0 = codexQuota()
+        lastGptQuota = "\(Self.clock()) " + ((q0?["text"] as? String) ?? "没找到额度记录")
+        guard let q = q0,
               let data = try? JSONSerialization.data(withJSONObject: q), let arg = String(data: data, encoding: .utf8) else { return }
         js("setQuota('gpt', \(arg))")
     }
@@ -1776,6 +1780,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         L.append("最近状态 \(poses.isEmpty ? "无" : poses.joined(separator: "，"))")
         let seen = lastSeen
         L.append("最近收到消息 " + Self.seenKeys.keys.sorted().map { "\($0) \(Self.agoText(seen[Self.seenKeys[$0]!]))" }.joined(separator: "，"))
+        if defaults.bool(forKey: "gptQuota") { L.append("GPT 额度最近一次读到 \(lastGptQuota)") }
         L.append("装在 \(Bundle.main.bundlePath.replacingOccurrences(of: NSHomeDirectory(), with: "~"))\(canSelfUpdate ? "" : "（不在应用程序文件夹，不能一键更新）")；"
                  + "开发者工具/python3 \(pythonReady ? "有" : "没有")；检查更新 \(lastUpdateCheck)；已运行 \(Int(now.timeIntervalSince(launchedAt) / 60)) 分钟")
         return L.joined(separator: "\n")

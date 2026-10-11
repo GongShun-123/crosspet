@@ -413,12 +413,14 @@ namespace CrossPet
             return c != null && Characters().Any(x => x.id == c) ? c : id;
         }
 
+        string lastGptQuota = "还没读过";
         void RefreshQuota()
         {
             if (!ready) return;
             if (Store.Flag("gptQuota"))
             {
                 var q = CodexQuota.Read();
+                lastGptQuota = $"{DateTime.Now:HH:mm:ss} " + (q != null && q.TryGetValue("text", out var qt) ? qt as string : "没找到额度记录");
                 if (q != null) Js($"setQuota('gpt', {Store.Json.Serialize(q)})");
             }
             if (Store.Flag("agyQuota")) _ = RefreshGeminiQuota();
@@ -1155,6 +1157,7 @@ namespace CrossPet
                 var poses = lastPose.Select(p => $"{p.Key}={p.Value.pose}（{(int)(now - p.Value.at).TotalSeconds}秒前）").OrderBy(x => x).ToList();
                 L.Add("最近状态 " + (poses.Count == 0 ? "无" : string.Join("，", poses)));
                 L.Add("最近收到消息 " + string.Join("，", SeenKeys.Keys.OrderBy(k => k).Select(k => $"{k} {AgoText(SeenAt(SeenKeys[k]))}")));
+                if (Store.Flag("gptQuota")) L.Add($"GPT 额度最近一次读到 {lastGptQuota}");
                 string wv = "?"; try { wv = CoreWebView2Environment.GetAvailableBrowserVersionString(); } catch { }
                 L.Add($"装在 {Store.Install}；数据 {Store.Data}；随包 Python {(File.Exists(Store.Python) ? "在" : "不在")}；WebView2 {wv}；检查更新 {lastUpdateCheck}；已运行 {(int)(DateTime.Now - launchedAt).TotalMinutes} 分钟");
             }
@@ -1362,7 +1365,7 @@ namespace CrossPet
                 }
                 else
                 {
-                    lastUpdateCheck = $"{DateTime.Now:MM-dd HH:mm} " + (tag == null ? "没拿到版本号" : $"已是最新（{tag}）");
+                    lastUpdateCheck = $"{DateTime.Now:MM-dd HH:mm} " + (tag == null ? "没拿到版本号" : $"已是最新（当前 {Store.Version}，发布页最新正式版 {tag}）");
                     if (manual) MessageBox.Show(tag == null ? "暂时连不上 GitHub，稍后再试。" : $"已经是最新版本（{Store.Version}）。", "CrossPet");
                 }
             }
