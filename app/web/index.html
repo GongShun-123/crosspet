@@ -617,9 +617,10 @@ function watchStuck() {
 }
 
 // ---- 特效省电 ----
-// 实测（M 系列 Mac）：身边的 SVG 特效（星星、思考云、小卡片）是耗电大头，60 帧时整个桌宠占一个核的 16%～19%，
+// 实测（M 系列 Mac）：身边的 SVG 特效（星星、思考云、小卡片）是耗电大头，SVG 自己的时钟跑时整个桌宠占一个核的 16%～19%，
 // 停掉特效只剩 1.5%；人物浮动、光晕是 CSS 变换，几乎不花钱。所以只管特效：
-// - 刷新率限到 30 帧（省电模式 15 帧）：暂停 SVG 自己的时钟，由一个定时器按帧推进（#fx、多会话卡片都算）
+// - 暂停 SVG 自己的时钟，跟着屏幕刷新按帧推进（#fx、多会话卡片都算）：平时 60 帧（干活时约 11%），省电模式 30 帧（约 8%）。
+//   15 帧时画笔、终端里的字明显一顿一顿，用户反馈过，所以省电模式也不再往下压
 // - 闲着（待机 / 累 / 睡着）超过 30 秒（省电模式 10 秒）：特效淡出并停下；睡着的 zZz 保留，每秒 5 帧
 // - 窗口看不见（被挡住、锁屏、屏幕休眠）：外壳调 setPageHidden(true)，全部暂停
 const RESTING = new Set(['idle', 'tired', 'sleeping'])
@@ -632,14 +633,28 @@ function fxTick() {
   }
 }
 function applyFxRate() {
-  const fps = pageHidden ? 0 : fxResting ? (pose === 'sleeping' ? 5 : 0) : powerSave ? 15 : 30
+  const fps = pageHidden ? 0 : fxResting ? (pose === 'sleeping' ? 5 : 0) : powerSave ? 30 : 60
   $('fx').classList.toggle('rest', fxResting && pose !== 'sleeping' && !pageHidden)
   document.documentElement.classList.toggle('frozen', pageHidden)
   if (fps === fxFps && (fps === 0 || fxClock)) return
   fxFps = fps
   clearInterval(fxClock); fxClock = null
   fxTick()   // 新出现的先接管（停住自己的时钟）
-  if (fps > 0) fxClock = setInterval(fxTick, 1000 / fps)
+  if (fps > 0) {
+    // 跟着屏幕刷新出帧（隔几帧出一帧），节拍均匀；单用定时器和屏幕刷新对不齐，一帧停得长一帧停得短，移动的文字、画笔看着一抖一抖
+    if (!fxRaf) fxRaf = requestAnimationFrame(fxLoop)
+    // 兜底：窗口在后台、刚从全屏回来时 requestAnimationFrame 可能不触发，这时按定时器走
+    fxClock = setInterval(() => {
+      if (performance.now() - fxLast > 250) { fxLast = performance.now(); fxTick(); if (!fxRaf) fxRaf = requestAnimationFrame(fxLoop) }
+    }, 1000 / Math.min(fps, 10))
+  }
+}
+let fxRaf = 0, fxLast = 0
+function fxLoop(t) {
+  fxRaf = 0
+  if (fxFps <= 0) return
+  if (t - fxLast >= 1000 / fxFps - 4) { fxLast = t; fxTick() }
+  fxRaf = requestAnimationFrame(fxLoop)
 }
 // 新画上去的特效马上接管，别先按 60 帧跑一下
 new MutationObserver(() => fxTick()).observe(document.getElementById('stage'), { childList: true, subtree: true })
