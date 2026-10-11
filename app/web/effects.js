@@ -106,7 +106,7 @@ const terminal = (() => {
   ).join('')
   return `<g><rect x="${x}" y="${y}" width="130" height="86" rx="8" fill="#262626" stroke="#fff" stroke-width="3"/>` +
     `<circle cx="${x + 12}" cy="${y + 11}" r="4" fill="#ff5f56"/><circle cx="${x + 24}" cy="${y + 11}" r="4" fill="#ffbd2e"/><circle cx="${x + 36}" cy="${y + 11}" r="4" fill="#27c93f"/>${lines}` +
-    `<animateTransform attributeName="transform" type="translate" values="0 0;0 -4;0 0" dur="1.2s" ${loop}/></g>`
+    `</g>`
 })()
 
 const magnifier = `<g><circle r="22" fill="#cfefff" fill-opacity="0.55" stroke="${INK}" stroke-width="5"/><circle cx="-7" cy="-7" r="6" fill="#fff" opacity="0.8"/><path d="M15 15 L34 34" stroke="#8b5a2b" stroke-width="8" stroke-linecap="round"/>` +
@@ -125,7 +125,7 @@ const browser = (() => {
     `<rect x="${x + 8}" y="${y + 24}" width="102" height="14" rx="7" fill="#f4f6f9" stroke="#c9ced6" stroke-width="1.5"/>` +
     `<circle cx="${x + 17}" cy="${y + 31}" r="3.2" fill="none" stroke="#8a93a0" stroke-width="1.5"/><path d="M${x + 19.5} ${y + 33.5} l3 3" stroke="#8a93a0" stroke-width="1.5" stroke-linecap="round"/>` +
     `<rect x="${x + 26}" y="${y + 29}" width="0" height="4" rx="2" fill="#8a93a0"><animate attributeName="width" values="0;52;52" keyTimes="0;0.28;1" dur="3.2s" ${loop}/></rect>` +
-    `${results}<animateTransform attributeName="transform" type="translate" values="0 0;0 -4;0 0" dur="2.4s" ${loop}/></g>`
+    `${results}</g>`
 })()
 const confetti = Array.from({ length: 10 }, (_, i) => {
   const x = i < 5 ? 14 + i * 18 : 486 + (i - 5) * 18
@@ -171,6 +171,7 @@ const winFrame = (x        , y        , w        , h        , dark         , acc
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="9" fill="${dark ? '#262626' : '#fff'}" stroke="${dark ? '#fff' : INK}" stroke-width="${dark ? 3 : 2.5}"/>` +
   (dark ? '' : `<path d="M${x} ${y + 9} a9 9 0 0 1 9 -9 h${w - 18} a9 9 0 0 1 9 9 v9 h-${w}z" fill="${accent || '#eef1f5'}"/>`) +
   `<circle cx="${x + 12}" cy="${y + 10}" r="3.5" fill="#ff5f56"/><circle cx="${x + 23}" cy="${y + 10}" r="3.5" fill="#ffbd2e"/><circle cx="${x + 34}" cy="${y + 10}" r="3.5" fill="#27c93f"/>`
+// 小卡片（终端、浏览器、编辑器……）不浮动：上下飘时每帧落在半个像素上，里面的小字、细线会闪、起锯齿，清晰更要紧
 const floatY = (dur = '2.4s', amp = 4) =>
   `<animateTransform attributeName="transform" type="translate" values="0 0;0 ${-amp};0 0" dur="${dur}" ${loop}/>`
 const appear = (from        , to        , dur        ) =>
@@ -211,7 +212,7 @@ const chatCard = (() => {
     `<g opacity="0"><rect x="${x + 44}" y="${y + 26}" width="72" height="22" rx="11" fill="#5b8def"/><rect x="${x + 54}" y="${y + 34}" width="46" height="5" rx="2.5" fill="#fff" opacity="0.9"/>` +
     `<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.15;1" dur="${D}" ${loop}/><animateTransform attributeName="transform" type="translate" values="20 0;0 0;0 0" keyTimes="0;0.15;1" dur="${D}" ${loop}/></g>` +
     `<g opacity="0"><rect x="${x + 14}" y="${y + 55}" width="46" height="22" rx="11" fill="#eef1f5"/>${dots}${appear(0.3, 0.38, D)}</g>` +
-    `${floatY()}</g>`
+    `</g>`
 })()
 
 // 等你回答：选项卡片——上面一行问题，后面三个点一跳一跳（在等你），下面两个选项，
@@ -230,7 +231,7 @@ const choiceCard = (() => {
     `<animateTransform attributeName="transform" type="translate" values="0 0;0 0;0 26;0 26;0 0" keyTimes="0;0.35;0.5;0.85;1" calcMode="spline" keySplines="0 0 1 1;0.45 0 0.55 1;0 0 1 1;0.45 0 0.55 1" dur="${D}" ${loop}/></g>`
   return `<g>${winFrame(x, y, 126, 104, false, '#eef0fb')}` +
     `<rect x="${x + 12}" y="${y + 30}" width="74" height="7" rx="3.5" fill="#6b4a3a" opacity="0.55"/>${dots}` +
-    `${option(y + 48, 58)}${option(y + 74, 46)}${highlight}${floatY('2.6s')}</g>`
+    `${option(y + 48, 58)}${option(y + 74, 46)}${highlight}</g>`
 })()
 
 // 有新版本：小窗口里一个往上跳的箭头、「NEW」标签和一条下载进度条，旁边几颗金色闪光
@@ -250,7 +251,7 @@ const updateCard = (progress = null) => {
       ? `<rect x="${x + 70}" y="${y + 66}" width="44" height="8" rx="4" fill="#e0a526"><animate attributeName="opacity" values="1;0.35;1" dur="1s" ${loop}/></rect>`
       : `<rect x="${x + 70}" y="${y + 66}" width="${(44 * Math.max(0, progress) / 100).toFixed(1)}" height="8" rx="4" fill="#e0a526"/>`
   const bar = `<rect x="${x + 70}" y="${y + 66}" width="44" height="8" rx="4" fill="#efe6d4"/>` + fill
-  return `<g>${winFrame(x, y, 126, 100, false, '#fff6dc')}${arrow}${badge}${bar}${floatY('2.6s')}</g>` +
+  return `<g>${winFrame(x, y, 126, 100, false, '#fff6dc')}${arrow}${badge}${bar}</g>` +
     star(80, 190, 0.9, '0.6s', '#ffd54a') + star(548, 360, 0.8, '0.2s', '#ffd54a') + star(60, 320, 0.7, '1s', '#ffd54a') + star(530, 220, 0.6, '0.9s')
 }
 
@@ -263,7 +264,7 @@ const viewerCard = (() => {
     `<rect x="${x + 9}" y="${y + 27 + i * 9}" width="7" height="4" rx="2" fill="#c9ced6"/>`).join('')
   return `<g>${winFrame(x, y, 126, 96, false)}${lines}` +
     `<rect x="${x + 4}" y="${y + 24}" width="118" height="10" rx="3" fill="#ffd36b" opacity="0.35"><animate attributeName="y" values="${y + 24};${y + 78};${y + 24}" dur="3.2s" ${loop}/></rect>` +
-    `${floatY('2.8s')}</g>`
+    `</g>`
 })()
 
 // 写文件：编辑器，代码一行行打出来，左边冒出绿色 +，光标闪
@@ -278,7 +279,7 @@ const editorCard = (() => {
   }).join('')
   return `<g>${winFrame(x, y, 126, 92, true)}${lines}` +
     `<rect x="${x + 22}" y="${y + 80}" width="6" height="8" fill="#e8e8e8"><animate attributeName="opacity" values="1;0;1" dur="0.8s" calcMode="discrete" ${loop}/></rect>` +
-    `${floatY('2s')}</g>`
+    `</g>`
 })()
 
 // 派帮手：任务列表，转圈的加载依次变成绿色对勾
@@ -292,7 +293,7 @@ const taskCard = (() => {
       `<g opacity="0"><circle cx="${x + 16}" cy="${cy}" r="7" fill="#3fb950"/><path d="M${x + 12.5} ${cy} l2.5 2.5 l4.5 -5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/>${appear(done, done + 0.01, D)}</g>` +
       `<rect x="${x + 30}" y="${cy - 3}" width="${[70, 56, 78][i]}" height="5" rx="2.5" fill="#c9ced6"/></g>`
   }).join('')
-  return `<g>${winFrame(x, y, 126, 90, false)}${rows}${floatY('2.6s')}</g>`
+  return `<g>${winFrame(x, y, 126, 90, false)}${rows}</g>`
 })()
 
 // 完成：清单卡片，三个勾依次画出来
@@ -305,7 +306,7 @@ const checklist = (() => {
       `<animate attributeName="stroke-dashoffset" values="16;16;0;0" keyTimes="0;${t0.toFixed(2)};${(t0 + 0.12).toFixed(2)};1" dur="${D}" ${loop}/></path>` +
       `<rect x="${x + 32}" y="${cy - 3}" width="${[66, 52, 72][i]}" height="5" rx="2.5" fill="#c9ced6"/>`
   }).join('')
-  return `<g>${winFrame(x, y, 118, 90, false, '#e6f6ea')}${rows}${floatY('2.2s')}</g>`
+  return `<g>${winFrame(x, y, 118, 90, false, '#e6f6ea')}${rows}</g>`
 })()
 
 // 出错：红色报错卡片，抖一抖
@@ -328,7 +329,7 @@ const musicCard = (() => {
     `<rect x="${x + 10}" y="${y + 26}" width="30" height="30" rx="6" fill="#f7c6d8"/><text x="${x + 17}" y="${y + 48}" font-size="18" fill="#c2577f" font-family="serif">♪</text>` +
     `${bars}<rect x="${x + 10}" y="${y + 63}" width="106" height="4" rx="2" fill="#f3d3df"/>` +
     `<rect x="${x + 10}" y="${y + 63}" width="0" height="4" rx="2" fill="#e07a9a"><animate attributeName="width" values="0;106" dur="6s" ${loop}/></rect>` +
-    `${floatY('2.6s')}</g>`
+    `</g>`
 })()
 
 // 大活完成：金奖杯（渐变 + 星星徽章 + 高光扫过），底下一块深色底座
@@ -363,7 +364,7 @@ const easelCard = (() => {
   const brush = `<g><path d="M0 0 l14 -14 l4 4 l-14 14z" fill="#c8a06a" stroke="${INK}" stroke-width="1.5"/><path d="M0 0 l-5 5 l3 2z" fill="#ff8fab"/>` +
     `<animateMotion path="M${x + 16} ${y + 64} Q${x + 40} ${y + 30} ${x + 64} ${y + 52} T${x + 112} ${y + 40} M${x + 18} ${y + 78} Q${x + 50} ${y + 58} ${x + 80} ${y + 74} T${x + 114} ${y + 66}" dur="${D}" ${loop}/></g>`
   return `<g>${winFrame(x, y, 126, 108, false, '#fde7f0')}<rect x="${x + 8}" y="${y + 24}" width="110" height="64" rx="4" fill="#fffdf8" stroke="#e5ddd0" stroke-width="1.5"/>` +
-    `${strokes}${palette}${brush}${floatY('2.8s')}</g>`
+    `${strokes}${palette}${brush}</g>`
 })()
 
 
