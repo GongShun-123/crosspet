@@ -314,6 +314,8 @@ namespace CrossPet
                         lastPose[id] = (pose ?? "", DateTime.UtcNow);
                         if (id != "current" && pose != "idle" && pose != "sleeping" && DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ts < 30 && ts > latestActive.ts) latestActive = (id, ts);
                         Js($"applyCharState({Q(id)}, {json})");
+                        // Codex 回完一轮：额度记录刚写进会话，马上读一次（不然要等每分钟一次的定时刷新）
+                        if (id == "gpt" && value.TryGetValue("event", out var ev) && ev as string == "Stop") After(1500, RefreshQuota);
                     }
                     else Js($"setQuota({Q(id)}, {json})");
                 }

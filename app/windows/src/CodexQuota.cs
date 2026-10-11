@@ -21,37 +21,42 @@ namespace CrossPet
                 var dir = Path.Combine(Store.Codex, "sessions", day.ToString("yyyy"), day.ToString("MM"), day.ToString("dd"));
                 try { files.AddRange(new DirectoryInfo(dir).GetFiles("*.jsonl")); } catch { }
             }
-            // 从最新的会话往前找：刚开的会话可能还没有额度记录
-            foreach (var f in files.OrderByDescending(f => f.LastWriteTimeUtc).Take(8))
+            // 挑「最新的额度记录」：Codex 开着会话文件一直往里写时，Windows 文件列表里的修改时间常常不更新（要等它关掉文件），
+            // 按修改时间挑会挑到旧对话、显示旧额度。所以多看几个最近的会话（修改时间、创建时间取新的那个排），
+            // 比较每条额度记录自己带的时间戳，取最新的
+            Dictionary<string, object> best = null; var bestTs = "";
+            foreach (var f in files.OrderByDescending(f => f.LastWriteTimeUtc > f.CreationTimeUtc ? f.LastWriteTimeUtc : f.CreationTimeUtc).Take(12))
             {
-                var q = FromFile(f.FullName);
-                if (q != null) return q;
+                var (q, ts) = FromFile(f.FullName);
+                if (q != null && string.CompareOrdinal(ts, bestTs) > 0) { best = q; bestTs = ts; }
             }
-            return null;
+            return best;
         }
 
-        static Dictionary<string, object> FromFile(string path)
+        static (Dictionary<string, object>, string) FromFile(string path)
         {
             string text;
             try
             {
                 using (var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
                 {
-                    var n = (int)Math.Min(s.Length, 1_000_000);
+                    var n = (int)Math.Min(s.Length, 400_000);
                     s.Seek(-n, SeekOrigin.End);
                     var buf = new byte[n]; var read = 0;
                     while (read < n) { var r = s.Read(buf, read, n - read); if (r <= 0) break; read += r; }
                     text = Encoding.UTF8.GetString(buf, 0, read);  // 截断处切到中文也不怕：坏的字节变成替换符
                 }
             }
-            catch { return null; }
+            catch { return (null, ""); }
 
             foreach (var line in text.Split('\n').Reverse())
             {
                 if (!line.Contains("\"rate_limits\"")) continue;
-                Dictionary<string, object> rl;
-                try { rl = Find(Store.Json.DeserializeObject(line)); } catch { continue; }
+                Dictionary<string, object> rl; object parsed;
+                try { parsed = Store.Json.DeserializeObject(line); rl = Find(parsed); } catch { continue; }
                 if (rl == null) continue;
+                // 每行开头的 "timestamp"：ISO 时间（UTC），按字符串比较就是按时间比较
+                var stamp = parsed is Dictionary<string, object> top && top.TryGetValue("timestamp", out var tsv) ? tsv as string ?? "" : "";
                 var windows = new List<(string label, double used, double reset)>();
                 foreach (var key in new[] { "primary", "secondary" })
                 {
@@ -80,15 +85,15 @@ namespace CrossPet
                     }
                     return piece;
                 });
-                return new Dictionary<string, object>
+                return (new Dictionary<string, object>
                 {
                     ["text"] = string.Join(" ｜ ", parts),
                     ["low"] = maxUsed >= 90,
                     // 给桌宠比对用：某个窗口在预定重置时间前突然恢复一大截 → 播 reset 动画
                     ["windows"] = windows.Select(w => new Dictionary<string, object> { ["label"] = w.label, ["used"] = w.used, ["reset"] = w.reset }).ToList(),
-                };
+                }, stamp);
             }
-            return null;
+            return (null, "");
         }
 
         static bool IsNumber(object v) => v is int || v is long || v is double || v is decimal;
