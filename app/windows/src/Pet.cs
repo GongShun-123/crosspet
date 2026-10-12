@@ -105,13 +105,19 @@ namespace CrossPet
             });
 
             Every(TimeSpan.FromMilliseconds(300), Poll);
-            Every(TimeSpan.FromSeconds(60), RefreshQuota);
+            Every(TimeSpan.FromSeconds(60), () => { RefreshQuota(); RefreshCodexQuota(CodexWhy.Tick); });
             Every(TimeSpan.FromSeconds(3), WatchClaudeConfig);
             // 锁屏时动画全停（看不见还在画，白白耗电）
             SystemEvents.SessionSwitch += (_, e) =>
             {
                 if (e.Reason == SessionSwitchReason.SessionLock || e.Reason == SessionSwitchReason.SessionUnlock)
-                    Window.Dispatcher.BeginInvoke(new Action(() => Js($"setPageHidden({(e.Reason == SessionSwitchReason.SessionLock ? "true" : "false")})")));
+                    Window.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        var locked = e.Reason == SessionSwitchReason.SessionLock;
+                        Js($"setPageHidden({(locked ? "true" : "false")})");
+                        var wasLocked = sessionLocked; sessionLocked = locked;
+                        if (wasLocked && !locked) RefreshCodexQuota(CodexWhy.Tick);   // 锁屏时没查：解锁补一次（自带间隔，不会多问）
+                    }));
             };
             // 检查更新：启动后 20 秒、之后每 3 小时，电脑从睡眠中醒来时也查一次（很多人的电脑一直不关机，只是合盖）
             Every(TimeSpan.FromHours(3), () => _ = CheckForUpdate());
@@ -167,6 +173,7 @@ namespace CrossPet
                     stamps.Clear();
                     Poll();
                     RefreshQuota();
+                    RefreshCodexQuota(CodexWhy.Now);
                     FollowForeground();
                 };
                 core.Navigate($"https://{Store.AppHost}/index.html");
@@ -315,7 +322,7 @@ namespace CrossPet
                         if (id != "current" && pose != "idle" && pose != "sleeping" && DateTimeOffset.UtcNow.ToUnixTimeSeconds() - ts < 30 && ts > latestActive.ts) latestActive = (id, ts);
                         Js($"applyCharState({Q(id)}, {json})");
                         // Codex 回完一轮：额度记录刚写进会话，马上读一次（不然要等每分钟一次的定时刷新）
-                        if (id == "gpt" && value.TryGetValue("event", out var ev) && ev as string == "Stop") After(1500, RefreshQuota);
+                        if (id == "gpt" && value.TryGetValue("event", out var ev) && ev as string == "Stop") After(1500, () => RefreshCodexQuota(CodexWhy.TurnEnd));
                     }
                     else Js($"setQuota({Q(id)}, {json})");
                 }
@@ -413,17 +420,56 @@ namespace CrossPet
             return c != null && Characters().Any(x => x.id == c) ? c : id;
         }
 
-        string lastGptQuota = "还没读过";
         void RefreshQuota()
         {
             if (!ready) return;
-            if (Store.Flag("gptQuota"))
-            {
-                var q = CodexQuota.Read();
-                lastGptQuota = $"{DateTime.Now:HH:mm:ss} " + (q != null && q.TryGetValue("text", out var qt) ? qt as string : "没找到额度记录");
-                if (q != null) Js($"setQuota('gpt', {Store.Json.Serialize(q)})");
-            }
             if (Store.Flag("agyQuota")) _ = RefreshGeminiQuota();
+        }
+
+        // ---- GPT 额度：什么时候拿、从哪拿（来源见 CodexQuota.cs，规则见 docs/superpowers/specs/2026-10-12-codex-quota-design.md）----
+        enum CodexWhy { Now, TurnEnd, Tick }
+        DateTime codexLiveAt = DateTime.MinValue;       // 上次问服务的时间（不管成没成）
+        DateTime codexRecordsAt = DateTime.MinValue;    // 上次读记录的时间：服务不通时也最多每分钟读一次
+        bool codexLiveOK, codexInFlight, sessionLocked;
+        string lastGptQuota = "还没读过";
+
+        /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次服务，
+        /// 服务不通时每分钟读一次记录。藏着、锁屏时定时的不查
+        async void RefreshCodexQuota(CodexWhy why)
+        {
+            if (!ready || !Store.Flag("gptQuota") || codexInFlight) return;
+            if (why == CodexWhy.Tick && (userHidden || sessionLocked)) return;
+            var since = (DateTime.UtcNow - codexLiveAt).TotalSeconds;
+            var askLive = why == CodexWhy.Now || (why == CodexWhy.TurnEnd && since >= 20) || (why == CodexWhy.Tick && since >= 300);
+            if (!askLive)
+            {
+                if (!codexLiveOK && (DateTime.UtcNow - codexRecordsAt).TotalSeconds >= 55) ApplyCodex("records", null, null, 0);
+                return;
+            }
+            codexLiveAt = DateTime.UtcNow;
+            var bin = CodexQuota.FindBinary();
+            if (bin == null) { codexLiveOK = false; ApplyCodex("records", null, "没找到 codex 程序", 0); return; }
+            codexInFlight = true;
+            try
+            {
+                var (rl, err, ms) = await CodexQuota.QueryLive(bin);
+                codexLiveOK = rl != null;
+                if (rl == null) CodexQuota.Forget();   // 程序可能被更新挪走了，下次重新找
+                ApplyCodex(rl != null ? "live" : "records", rl, err, ms);
+            }
+            catch (Exception e) { Store.Log("GPT 额度: " + e.Message); }
+            finally { codexInFlight = false; }
+        }
+
+        /// 交给网页；records 来源时这里现读记录（rl 传 null）
+        void ApplyCodex(string source, Dictionary<string, object> rl, string error, int ms)
+        {
+            if (!Store.Flag("gptQuota")) return;   // 查的途中关掉了额度显示
+            if (source == "records") { codexRecordsAt = DateTime.UtcNow; rl = CodexQuota.Records(); if (rl == null) source = "none"; }
+            var tag = source == "live" ? $"Codex 服务，{ms / 1000.0:0.0} 秒" : source == "records" ? "本机记录" + CodexQuota.WslNote : "没读到";
+            lastGptQuota = $"{DateTime.Now:HH:mm:ss} （{tag}{(error != null ? "；服务：" + error : "")}）" + (rl != null ? CodexQuota.Brief(rl) : "");
+            if (source == "none") return;
+            Js($"setCodexQuota({Store.Json.Serialize(CodexQuota.Payload(source, rl, error, ms))})");
         }
         bool askingGemini;
         async Task RefreshGeminiQuota()
@@ -716,6 +762,7 @@ namespace CrossPet
                 if (Window.Topmost) Native.BringToTop(hwnd);
             }
             Js($"setPageHidden({(hidden ? "true" : "false")})");
+            if (!hidden) RefreshCodexQuota(CodexWhy.Tick);   // 藏着时没查：叫回来补一次（自带间隔，不会多问）
         }
 
         public void Recenter()
@@ -991,7 +1038,7 @@ namespace CrossPet
                         case "followApps": case "followEvents": Store.Settings[key] = on; Store.SaveSettings(); break;
                         case "gptQuota":
                             Store.Settings[key] = on; Store.SaveSettings();
-                            if (on) RefreshQuota(); else Js("setQuota('gpt', null)");
+                            if (on) RefreshCodexQuota(CodexWhy.Now); else Js("setCodexQuota(null)");
                             break;
                         case "agyQuota":
                             Store.Settings[key] = on; Store.SaveSettings();
