@@ -142,6 +142,7 @@ html.no-name #caption { display: none; }
   <div id="foot"><div id="caption"></div><div id="quota"></div></div>
 </div>
 <script src="effects.js"></script>
+<script src="codex-quota.js"></script>
 <script>
 // CrossPet 画面：由 CrossPet.app（Swift 外壳）调用这几个函数
 //   init(manifest)          角色清单（characters/*/character.json + 立绘）
@@ -910,6 +911,8 @@ function celebrate(id, ev) {
   revertTimer = setTimeout(() => { setPose(restPose()); say('') }, 6500)
 }
 
+// GPT 额度：外壳交来原始额度（见 codex-quota.js），排好版再走 setQuota
+function setCodexQuota(p) { setQuota('gpt', p ? CodexQuota.view(p, Date.now() / 1000) : null) }
 function setQuota(id, q) {
   const wasLow = quota[id]?.low
   quota[id] = q
