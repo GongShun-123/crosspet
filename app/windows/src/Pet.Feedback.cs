@@ -90,7 +90,7 @@ namespace CrossPet
                 var skins = Store.Settings.TryGetValue("skins", out var sv) ? Store.Json.Serialize(sv) : "";
                 L.Add($"角色 {current}{(skins == "" || skins == "{}" ? "" : "，衣服 " + skins)}；设置：名字 {(ShowName ? "开" : "关")}，光晕 {AuraMode}，省电 {(PowerSave ? "开" : "关")}，彩蛋 {(EggsEnabled ? "开" : "关")}，"
                       + $"跟随前台 {(Store.Flag("followApps") ? "开" : "关")}，跟随事件 {(Store.Flag("followEvents") ? "开" : "关")}，AI 干活自动出现 {(AIAutostart ? "开" : "关")}，贴边 {(EdgeDockEnabled ? "开" : "关")}，"
-                      + $"GPT 额度 {(Store.Flag("gptQuota") ? "开" : "关")}，Gemini 额度 {(Store.Flag("agyQuota") ? "开" : "关")}，DeepSeek 余额 {(DsQuotaEnabled ? "开" : "关")}，登录启动 {(LoginEnabled ? "开" : "关")}");
+                      + $"GPT 额度 {(Store.Flag("gptQuota") ? "开" : "关")}，Gemini 额度 {(Store.Flag("agyQuota") ? "开" : "关")}，DeepSeek 余额 {(DsQuotaEnabled ? "开" : "关")}，额度合并 {(QuotaAggregate ? "开" : "关")}，登录启动 {(LoginEnabled ? "开" : "关")}");
                 var now = DateTime.UtcNow;
                 var poses = lastPose.Select(p => $"{p.Key}={p.Value.pose}（{(int)(now - p.Value.at).TotalSeconds}秒前）").OrderBy(x => x).ToList();
                 L.Add("最近状态 " + (poses.Count == 0 ? "无" : string.Join("，", poses)));
