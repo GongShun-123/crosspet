@@ -587,13 +587,13 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     // MARK: GPT 额度（可选，默认关）：什么时候拿、从哪拿（来源见文件末尾 CodexQuotaSource）
     enum CodexWhy { case now, turnEnd, tick }
     var codexLiveAt = Date.distantPast       // 上次问服务的时间（不管成没成）
-    var codexLiveOK = false                  // 上次问服务成功了没
     var codexInFlight = false
-    var codexRecordsAt = Date.distantPast    // 上次读记录的时间：服务不通时也最多每分钟读一次
+    var codexLast: (rateLimits: [String: Any], at: Date)?   // 最后一次问到的额度：问不到时接着显示它，并标上时间
+    var codexNote = ""                       // 从没问到过时的原因，设置里那个开关下面显示
     var lastGptQuota = "还没读过"
 
-    /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次服务，
-    /// 服务不通时每分钟读一次记录。藏着、屏幕休眠时定时的不查
+    /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次。
+    /// 藏着、屏幕休眠时定时的不查
     func refreshCodexQuota(_ why: CodexWhy) {
         guard ready, defaults.bool(forKey: "gptQuota"), !codexInFlight else { return }
         if why == .tick && (screensAsleep || userHidden) { return }
@@ -604,10 +604,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         case .turnEnd: askLive = since >= 20
         case .tick: askLive = since >= 300
         }
-        if !askLive {
-            if !codexLiveOK && Date().timeIntervalSince(codexRecordsAt) >= 55 { applyCodex(source: "records", rateLimits: nil, error: nil, ms: 0) }   // 服务不通：每分钟读记录
-            return
-        }
+        if !askLive { return }
         codexLiveAt = Date()
         codexInFlight = true
         // 找程序可能要起一次登录 shell，放到后台，别卡住桌宠。程序被更新挪走的话 findBinary 下次会发现路径不在、重新找
@@ -615,8 +612,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             let finish = { (rl: [String: Any]?, err: String?, ms: Int) in
                 DispatchQueue.main.async {
                     self.codexInFlight = false
-                    self.codexLiveOK = rl != nil
-                    self.applyCodex(source: rl != nil ? "live" : "records", rateLimits: rl, error: err, ms: ms)
+                    self.applyCodex(rateLimits: rl, error: err, ms: ms)
                 }
             }
             guard let bin = CodexQuotaSource.findBinary() else { finish(nil, "没找到 codex 程序", 0); return }
@@ -624,15 +620,18 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         }
     }
 
-    /// 交给网页；records 来源时这里现读记录（rateLimits 传 nil）
-    func applyCodex(source: String, rateLimits: [String: Any]?, error: String?, ms: Int) {
+    /// 交给网页：问到了就是 live；没问到、但以前问到过，就接着显示最后一次的数（stale，网页标上是几点的数据）；从没问到过就不显示
+    func applyCodex(rateLimits: [String: Any]?, error: String?, ms: Int) {
         guard defaults.bool(forKey: "gptQuota") else { return }   // 查的途中关掉了额度显示
-        var src = source, rl = rateLimits
-        if src == "records" { codexRecordsAt = Date(); rl = CodexQuotaSource.records()?.rateLimits; if rl == nil { src = "none" } }
-        let tag = src == "live" ? "Codex 服务，\(String(format: "%.1f", Double(ms) / 1000)) 秒" : src == "records" ? "本机记录" : "没读到"
-        lastGptQuota = "\(Self.clock()) （\(tag)\(error.map { "；服务：\($0)" } ?? "")）" + (rl.map { CodexQuotaSource.brief($0) } ?? "")
-        guard src != "none", let p = try? JSONSerialization.data(withJSONObject: CodexQuotaSource.payload(source: src, rateLimits: rl, error: error, ms: ms)),
-              let arg = String(data: p, encoding: .utf8) else { return }
+        if let rl = rateLimits { codexLast = (rl, Date()); codexNote = "" }
+        else if codexLast == nil { codexNote = "问不到 Codex：\(error ?? "原因不明")" }
+        let tag = rateLimits != nil ? "Codex 服务，\(String(format: "%.1f", Double(ms) / 1000)) 秒" : "没问到：\(error ?? "原因不明")"
+        lastGptQuota = "\(Self.clock()) （\(tag)）" + (codexLast.map { (rateLimits == nil ? "沿用 \(Self.hm($0.at)) 的数：" : "") + CodexQuotaSource.brief($0.rateLimits) } ?? "")
+        pushSettings()
+        guard let last = codexLast else { js("setCodexQuota(null)"); return }
+        var p = CodexQuotaSource.payload(source: rateLimits != nil ? "live" : "stale", rateLimits: last.rateLimits, error: error, ms: ms)
+        p["at"] = last.at.timeIntervalSince1970
+        guard let d = try? JSONSerialization.data(withJSONObject: p), let arg = String(data: d, encoding: .utf8) else { return }
         js("setCodexQuota(\(arg))")
     }
 
@@ -1395,7 +1394,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         var state: [String: Any] = [
             "version": currentVersion, "platform": "mac",
             "size": Double(petScale), "showName": showName, "eggs": eggsEnabled, "hideFullscreen": hideInFullscreen, "aura": auraMode, "followApps": followApps,
-            "gptQuota": defaults.bool(forKey: "gptQuota"), "agyQuota": defaults.bool(forKey: "agyQuota"),
+            "gptQuota": defaults.bool(forKey: "gptQuota"), "agyQuota": defaults.bool(forKey: "agyQuota"), "gptQuotaNote": codexNote,
             "login": SMAppService.mainApp.status == .enabled,
             "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "powerSave": powerSave,
             "hideHotkey": hideHotkey, "hotkeyFailed": hotkeyFailed, "hotkeys": [["id": "off", "label": "不用快捷键"]] + Self.hotkeyChoices.map { ["id": $0.id, "label": $0.label] },
@@ -1730,6 +1729,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     static func clock() -> String { let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm"; return f.string(from: Date()) }
+    static func hm(_ d: Date) -> String { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d) }
     let launchedAt = Date()
     var diagText = ""   // 接入工具的诊断（integrate.py diagnose），反馈窗口打开时跑一次
 
@@ -1908,8 +1908,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
 
 // MARK: GPT（Codex）额度来源
-// 主来源：起 `codex app-server`，问 account/rateLimits/read——Codex 用它自己的登录状态向 OpenAI 查实时额度
-// （等同于在 Codex 里看使用情况，不对话、不耗额度；CrossPet 不碰凭据）。备用：本机会话记录（见 records）。
+// 起 `codex app-server`，问 account/rateLimits/read——Codex 用它自己的登录状态向 OpenAI 查实时额度
+// （等同于在 Codex 里看使用情况，不对话、不耗额度；CrossPet 不碰凭据）。
+// 不再读本机会话记录：Codex 回复了也不一定往里写额度，读出来的常常是旧数还看着像新的（1.3.3 测试里实测）。
 // 排版在网页 codex-quota.js 里做，这里只交原始数据。规则见 docs/superpowers/specs/2026-10-12-codex-quota-design.md
 enum CodexQuotaSource {
     static var cachedBinary: String?
@@ -1980,56 +1981,11 @@ enum CodexQuotaSource {
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { finish(nil, "超时（\(Int(timeout)) 秒没回）") }
     }
 
-    static var home: URL {
-        if let h = ProcessInfo.processInfo.environment["CODEX_HOME"], !h.isEmpty { return URL(fileURLWithPath: h) }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
-    }
-
-    /// 备用：最近 4 天的会话记录里，按每行自带的 timestamp 取最新的一条 rate_limits
-    /// （按文件挑会被「文件新、记录旧」骗：比如一个开着没再说话的对话被别的程序碰了一下）
-    static func records(home: URL = home) -> (rateLimits: [String: Any], ts: String)? {
-        let fm = FileManager.default, cal = Calendar.current
-        var files: [(URL, Date)] = []
-        for back in 0..<4 {
-            guard let day = cal.date(byAdding: .day, value: -back, to: Date()) else { continue }
-            let c = cal.dateComponents([.year, .month, .day], from: day)
-            let dir = home.appendingPathComponent(String(format: "sessions/%04d/%02d/%02d", c.year!, c.month!, c.day!))
-            for f in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey])) ?? [] where f.pathExtension == "jsonl" {
-                let v = try? f.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
-                files.append((f, max(v?.contentModificationDate ?? .distantPast, v?.creationDate ?? .distantPast)))
-            }
-        }
-        var best: (rateLimits: [String: Any], ts: String)?
-        for (file, _) in files.sorted(by: { $0.1 > $1.1 }).prefix(12) {
-            guard let h = try? FileHandle(forReadingFrom: file) else { continue }
-            defer { try? h.close() }
-            let size = (try? h.seekToEnd()) ?? 0
-            try? h.seek(toOffset: size > 400_000 ? size - 400_000 : 0)
-            guard let data = try? h.readToEnd() else { continue }
-            for line in String(decoding: data, as: UTF8.self).split(separator: "\n").reversed() where line.contains("\"rate_limits\"") {
-                guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                      let rl = findRateLimits(obj), rl["primary"] is [String: Any] || rl["secondary"] is [String: Any] else { continue }
-                let ts = obj["timestamp"] as? String ?? ""
-                if best == nil || ts > best!.ts { best = (rl, ts) }
-                break   // 这个文件里最后一条就是它最新的
-            }
-        }
-        return best
-    }
-
-    static func findRateLimits(_ o: Any) -> [String: Any]? {
-        if let d = o as? [String: Any] {
-            if let rl = d["rate_limits"] as? [String: Any] { return rl }
-            for v in d.values { if let r = findRateLimits(v) { return r } }
-        } else if let a = o as? [Any] { for v in a { if let r = findRateLimits(v) { return r } } }
-        return nil
-    }
-
     /// 运行状态里的简写：5小时已用 3%，本周已用 40%
     static func brief(_ rl: [String: Any]) -> String {
         ["primary", "secondary"].compactMap { k -> String? in
-            guard let w = rl[k] as? [String: Any], let u = (w["usedPercent"] ?? w["used_percent"]) as? NSNumber else { return nil }
-            let mins = ((w["windowDurationMins"] ?? w["window_minutes"]) as? NSNumber)?.intValue ?? 0
+            guard let w = rl[k] as? [String: Any], let u = w["usedPercent"] as? NSNumber else { return nil }
+            let mins = (w["windowDurationMins"] as? NSNumber)?.intValue ?? 0
             return "\(mins >= 10080 ? "本周" : mins >= 1440 ? "今日" : "\(max(1, mins / 60))小时")已用 \(Int(u.doubleValue.rounded()))%"
         }.joined(separator: "，")
     }
@@ -2046,11 +2002,9 @@ enum CodexQuotaSource {
 // 往已经退出的子进程（codex app-server）写东西时，系统默认发 SIGPIPE 把整个 App 杀掉：忽略它，写失败只返回错误
 signal(SIGPIPE, SIG_IGN)
 
-// 测试用：只问一次 GPT 额度，打印 JSON 就退出（tests/codex_quota_probe.sh）；服务失败时和 App 一样退回读记录
+// 测试用：只问一次 GPT 额度，打印 JSON 就退出（tests/codex_quota_probe.sh）
 func probeResult(_ rl: [String: Any]?, _ err: String?, _ ms: Int) -> [String: Any] {
-    if let rl = rl { return CodexQuotaSource.payload(source: "live", rateLimits: rl, error: nil, ms: ms) }
-    if let r = CodexQuotaSource.records() { return CodexQuotaSource.payload(source: "records", rateLimits: r.rateLimits, error: err, ms: ms) }
-    return CodexQuotaSource.payload(source: "none", rateLimits: nil, error: err, ms: ms)
+    CodexQuotaSource.payload(source: rl != nil ? "live" : "none", rateLimits: rl, error: rl != nil ? nil : err, ms: ms)
 }
 if CommandLine.arguments.contains("--codex-quota-probe") {
     let sem = DispatchSemaphore(value: 0); var out: [String: Any] = [:]

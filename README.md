@@ -39,7 +39,7 @@
 | AI | 自动换形象 | 跟着干活 | 额度 / 余额 |
 |---|:---:|---|---|
 | **Claude**（Claude Code、Claude 桌面版） | ✅ | ✅ 钩子或增强版 mod | ✅ 用增强版 mod 时 |
-| **GPT**（Codex、ChatGPT 桌面版） | ✅ | ✅ Codex 钩子 | ✅ 可选，读 Codex 会话记录 |
+| **GPT**（Codex、ChatGPT 桌面版） | ✅ | ✅ Codex 钩子 | ✅ 可选，问电脑上的 Codex |
 | **DeepSeek**（DeepSeek Harness 桌面版） | ✅ | ✅ 插件 | ✅ 插件查余额（填了 API Key 或登录了账号都行；用别家服务商时不显示） |
 | **Gemini**（Antigravity、Gemini 桌面版） | ✅ | ✅ Antigravity 钩子 | ✅ 可选，询问本机 Antigravity |
 | **GLM**（智谱 ZCode） | ✅ | ✅ ZCode 钩子 | — |
@@ -159,7 +159,7 @@ DeepSeek 和 GLM 是对手，会趁对方不在上门捣乱：用 GLM 时，Deep
 ## 隐私
 
 - 钩子只拿到「哪个事件、用了哪个工具」，写到本机的状态目录（macOS 是 `/tmp/crosspet/`，Windows 是 `%LOCALAPPDATA%\CrossPet\state`），不保存任何对话内容。
-- GPT 额度默认关闭。打开后，CrossPet 每 5 分钟（以及 Codex 每回完一轮时）让**你电脑上的 Codex 自己**向 OpenAI 查一次额度——和在 Codex 里看「使用情况」是同一件事，只是查用量，不对话、**不消耗额度**；CrossPet 不读你的登录凭据，只拿额度数字。找不到 Codex 程序、没登录或断网时，退回从本机 Codex 会话记录里提取额度数字（显示「本机记录」）。
+- GPT 额度默认关闭。打开后，CrossPet 每 5 分钟（以及 Codex 每回完一轮时）让**你电脑上的 Codex 自己**向 OpenAI 查一次额度——和在 Codex 里看「使用情况」是同一件事，只是查用量，不对话、**不消耗额度**；CrossPet 不读你的登录凭据，只拿额度数字。问不到时（没装 Codex、没登录、断网）接着显示最后一次问到的数，并标上那是几点的数据；从没问到过就不显示。在 Windows 上，Windows 这边问不到、WSL 又开着时，会在 WSL 里问那边的 Codex。
 - Gemini 额度默认关闭。打开后向本机正在运行的 Antigravity 后台服务问一次额度（和它自己界面上显示额度的方式一样），用的是它每次启动随机生成、只在本机有效的令牌，不碰你的 Google 账号凭据。
 - DeepSeek 余额：插件通过 DeepSeek Harness 官方的凭据接口取 Key，只用来调官方余额接口，不写盘、不上传别处；没填 Key 时调 Harness 自己的账号服务查，登录凭据始终留在 Harness 里，插件只拿到余额数字。
 - WorkBuddy、ZCode：钩子只拿到事件名、工具名和当前模型名，用来选角色；不读它们的登录凭据，所以也不显示它们的额度 / 积分。

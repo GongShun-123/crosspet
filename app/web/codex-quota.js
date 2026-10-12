@@ -1,5 +1,5 @@
-// GPT（Codex）额度排版：外壳交来原始额度（问 Codex 服务得到的 camelCase，或会话记录里的 snake_case），
-// 这里统一成名牌下面那一行。两个平台共用这一份，规则只写一遍
+// GPT（Codex）额度排版：外壳交来问 Codex 服务得到的原始额度，这里排成名牌下面那一行。两个平台共用这一份，规则只写一遍。
+// source：live = 刚问到的；stale = 这次没问到（断网、没登录……），外壳把最后一次问到的数交过来，末尾标上那是几点的数据
 ;(function (root) {
   const pad = n => String(n).padStart(2, '0')
   const label = mins => mins >= 7 * 24 * 60 ? '本周' : mins >= 24 * 60 ? '今日' : `${Math.max(1, Math.floor(mins / 60))}小时`
@@ -8,10 +8,10 @@
     for (const key of ['primary', 'secondary']) {
       const w = rl && rl[key]
       if (!w) continue
-      const used = w.usedPercent ?? w.used_percent
+      const used = w.usedPercent
       if (typeof used !== 'number') continue
-      const mins = w.windowDurationMins ?? w.window_minutes ?? 0
-      const reset = w.resetsAt ?? w.resets_at
+      const mins = w.windowDurationMins ?? 0
+      const reset = w.resetsAt
       out.push({ label: label(mins), used, reset: typeof reset === 'number' ? reset : 0 })
     }
     return out
@@ -35,7 +35,7 @@
       return s
     })
     let text = parts.join(' ｜ ')
-    if (p.source === 'records') text += ' · 本机记录'   // 没问到 Codex，用的是本机会话记录，可能不是最新
+    if (p.source === 'stale' && typeof p.at === 'number') { const d = new Date(p.at * 1000); text += ` · ${pad(d.getHours())}:${pad(d.getMinutes())} 的数据` }
     return { text, low: maxUsed >= 90, windows, source: p.source || 'live' }
   }
   root.CodexQuota = { view }

@@ -148,7 +148,7 @@ html.no-name #caption { display: none; }
 //   init(manifest)          角色清单（characters/*/character.json + 立绘）
 //   setCharacter(id)        切换角色（按前台应用自动切，或右键菜单）
 //   applyCharState(id, s)   某个 AI 的工作状态（各接入写的 <id>-state.json）
-//   setQuota(id, q)         某个 AI 的额度 / 余额（<id>-quota.json，或 GPT 的 Codex 会话记录）
+//   setQuota(id, q)         某个 AI 的额度 / 余额（<id>-quota.json；GPT 走 setCodexQuota，问 Codex 服务）
 //   handleClick(kind)       单击 = pat（摸摸头），右键菜单「戳一下」= poke
 //   playEgg(force)          彩蛋
 
@@ -884,14 +884,11 @@ function quotaEvent(id, q) {
   quotaMemory(m => {
     const prev = m[id] || {}, now = Date.now() / 1000
     if (Array.isArray(q.windows)) {
-      // GPT 额度有两个来源（Codex 服务 / 本机记录，见 codex-quota.js）：来源变了不比——记录常常比服务旧，
-      // 从服务切到记录时看着像「额度突然恢复」，会误播 reset
-      const sameSource = (q.source || '') === (prev.source || '')
       for (const w of q.windows) {
         const p = (prev.windows || []).find(x => x.label === w.label)
-        if (sameSource && p && p.reset && now < p.reset - 600 && p.used - w.used >= 15) ev = 'reset'
+        if (p && p.reset && now < p.reset - 600 && p.used - w.used >= 15) ev = 'reset'
       }
-      m[id] = { ...prev, windows: q.windows, source: q.source || '' }
+      m[id] = { ...prev, windows: q.windows }
     }
     const bal = typeof q.balance === 'number' ? q.balance : parseFloat(((q.text || '').match(/[¥$]\s*([\d.]+)/) || [])[1])
     if (!isNaN(bal)) {
@@ -914,7 +911,7 @@ function celebrate(id, ev) {
   revertTimer = setTimeout(() => { setPose(restPose()); say('') }, 6500)
 }
 
-// GPT 额度：外壳交来原始额度（见 codex-quota.js），排好版再走 setQuota
+// GPT 额度：外壳交来问 Codex 服务得到的原始额度（见 codex-quota.js），排好版再走 setQuota
 function setCodexQuota(p) { setQuota('gpt', p ? CodexQuota.view(p, Date.now() / 1000) : null) }
 function setQuota(id, q) {
   const wasLow = quota[id]?.low

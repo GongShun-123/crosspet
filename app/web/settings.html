@@ -88,7 +88,7 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 
 <div class="card">
   <h2>额度</h2>
-  <div class="item"><div class="label">显示 GPT 额度<small>让电脑上的 Codex 自己查用量（不对话、不耗额度，不碰登录凭据）；查不到时读本机会话记录</small></div>
+  <div class="item"><div class="label"><span id="gptLabel">显示 GPT 额度<small id="gptNote">让电脑上的 Codex 自己查用量（不对话、不耗额度，不碰登录凭据）</small></span></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="gptQuota"><span></span></label></div></div>
   <div class="item"><div class="label">显示 Gemini 额度<small>询问本机正在运行的 Antigravity</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="agyQuota"><span></span></label></div></div>
@@ -157,6 +157,10 @@ function setState(s) {
     n.textContent = s.hotkeyFailed ? '这个快捷键被别的程序占用了，换一个试试' : '按一下藏起来，再按一下出来；也可以点菜单栏的爪印（Windows 双击托盘图标）叫她出来'
     n.classList.toggle('warn', !!s.hotkeyFailed)
   }
+  // GPT 额度问不到 Codex 时，外壳把原因交过来（没找到 codex、没登录……）
+  const gn = $('gptNote')
+  gn.textContent = s.gptQuotaNote || '让电脑上的 Codex 自己查用量（不对话、不耗额度，不碰登录凭据）'
+  gn.classList.toggle('warn', !!s.gptQuotaNote)
   renderIntegrations(s.integrations)
 }
 

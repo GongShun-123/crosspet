@@ -1005,7 +1005,7 @@ def diagnose() -> str:
     L.append(f"[Codex] hooks.json：{file_state(CODEX_HOOKS, lambda: has_hooks(CODEX_HOOKS))}；目录里其他文件 {'有' if found(CODEX_HOOKS.parent, '', ('hooks.json',), quiet=True) else '没有（Codex 可能没在这里运行过）'}")
     L.append(f"  config.toml {'在' if (CODEX_HOOKS.parent / 'config.toml').exists() else '不在'}；环境变量 {env_line('CODEX_HOME')}；终端配置里设了 CODEX_HOME：{'、'.join(shell_profile_mentions('CODEX_HOME')) or '无'}")
     progs = codex_programs()
-    L.append("  codex 程序（GPT 额度向它查）：" + ("；".join(short(Path(p.split("（")[0])) + "（" + p.split("（", 1)[1] for p in progs) if progs else "没找到——额度只能读本机会话记录"))
+    L.append("  codex 程序（GPT 额度向它查）：" + ("；".join(short(Path(p.split("（")[0])) + "（" + p.split("（", 1)[1] for p in progs) if progs else "没找到——GPT 额度显示不了"))
     w = wsl_codex_homes()
     if w:
         L.append(f"  WSL：{'；'.join(w)}")

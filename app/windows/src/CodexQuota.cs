@@ -10,8 +10,10 @@ namespace CrossPet
 {
     /// <summary>
     /// GPT（Codex）额度来源，和 macOS 版 CodexQuotaSource 同一套规则（docs/superpowers/specs/2026-10-12-codex-quota-design.md）：
-    /// 主来源起 `codex app-server` 问 account/rateLimits/read（Codex 用自己的登录查实时额度，不对话、不耗额度；CrossPet 不碰凭据）；
-    /// 备用读会话记录（CODEX_HOME，加上开着的 WSL 里的）。排版在网页 codex-quota.js 里做，这里只交原始数据
+    /// 起 `codex app-server` 问 account/rateLimits/read（Codex 用自己的登录查实时额度，不对话、不耗额度；CrossPet 不碰凭据）。
+    /// Windows 这边的 Codex 问不到（没装、没登录）时，WSL 开着的话在 WSL 里问。
+    /// 不再读会话记录：Codex 回复了也不一定往里写额度，读出来的常常是旧数还看着像新的（1.3.3 测试里实测）。
+    /// 排版在网页 codex-quota.js 里做，这里只交原始数据
     /// </summary>
     static class CodexQuota
     {
@@ -80,14 +82,18 @@ namespace CrossPet
             try { if (!p.HasExited) p.Kill(); } catch { }
         }
 
-        public static async Task<(Dictionary<string, object> rateLimits, string error, int ms)> QueryLive(string binary, int timeoutMs = 15000)
+        public static Task<(Dictionary<string, object> rateLimits, string error, int ms)> QueryLive(string binary, int timeoutMs = 15000)
+        {
+            var cmd = binary.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase);
+            return Query(cmd ? "cmd.exe" : binary, cmd ? $"/d /s /c \"\"{binary}\" app-server\"" : "app-server", timeoutMs);
+        }
+
+        static async Task<(Dictionary<string, object> rateLimits, string error, int ms)> Query(string file, string args, int timeoutMs)
         {
             var sw = Stopwatch.StartNew();
-            var cmd = binary.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase);
             var psi = new ProcessStartInfo
             {
-                FileName = cmd ? "cmd.exe" : binary,
-                Arguments = cmd ? $"/d /s /c \"\"{binary}\" app-server\"" : "app-server",
+                FileName = file, Arguments = args,
                 UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
                 StandardOutputEncoding = new UTF8Encoding(false),
@@ -144,8 +150,8 @@ namespace CrossPet
             foreach (var k in new[] { "primary", "secondary" })
             {
                 if (!(rl.TryGetValue(k, out var w) && w is Dictionary<string, object> win)) continue;
-                var used = win.TryGetValue("usedPercent", out var u) ? u : win.TryGetValue("used_percent", out var u2) ? u2 : null;
-                var mins = win.TryGetValue("windowDurationMins", out var m) ? m : win.TryGetValue("window_minutes", out var m2) ? m2 : null;
+                var used = win.TryGetValue("usedPercent", out var u) ? u : null;
+                var mins = win.TryGetValue("windowDurationMins", out var m) ? m : null;
                 if (!IsNumber(used)) continue;
                 var mm = IsNumber(mins) ? Convert.ToInt32(mins) : 0;
                 parts.Add($"{(mm >= 10080 ? "本周" : mm >= 1440 ? "今日" : $"{Math.Max(1, mm / 60)}小时")}已用 {(int)Math.Round(Convert.ToDouble(used), MidpointRounding.AwayFromZero)}%");
@@ -153,95 +159,53 @@ namespace CrossPet
             return string.Join("，", parts);
         }
 
-        // ---------------- 备用：会话记录 ----------------
-
-        /// 最近 4 天的会话记录里（Windows 这边加上开着的 WSL 里的），按每行自带的 timestamp 取最新的一条 rate_limits
-        public static Dictionary<string, object> Records()
-        {
-            var files = new List<FileInfo>();
-            foreach (var home in new[] { Store.Codex }.Concat(WslHomes()))
-                for (int back = 0; back < 4; back++)
-                {
-                    var day = DateTime.Now.AddDays(-back);
-                    var dir = Path.Combine(home, "sessions", day.ToString("yyyy"), day.ToString("MM"), day.ToString("dd"));
-                    try { files.AddRange(new DirectoryInfo(dir).GetFiles("*.jsonl")); } catch { }
-                }
-            Dictionary<string, object> best = null; var bestTs = "";
-            // Codex 开着会话文件写的时候，文件列表里的修改时间常常不更新：修改 / 创建时间取新的排，最后按记录自己的时间比
-            foreach (var f in files.OrderByDescending(f => f.LastWriteTimeUtc > f.CreationTimeUtc ? f.LastWriteTimeUtc : f.CreationTimeUtc).Take(12))
-            {
-                var (rl, ts) = FromFile(f.FullName);
-                if (rl != null && (best == null || string.CompareOrdinal(ts, bestTs) > 0)) { best = rl; bestTs = ts; }
-            }
-            return best;
-        }
-
-        static (Dictionary<string, object>, string) FromFile(string path)
-        {
-            string text;
-            try
-            {
-                using (var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                {
-                    var n = (int)Math.Min(s.Length, 400_000);
-                    s.Seek(-n, SeekOrigin.End);
-                    var buf = new byte[n]; var read = 0;
-                    while (read < n) { var r = s.Read(buf, read, n - read); if (r <= 0) break; read += r; }
-                    text = Encoding.UTF8.GetString(buf, 0, read);  // 截断处切到中文也不怕：坏的字节变成替换符
-                }
-            }
-            catch { return (null, ""); }
-            foreach (var line in text.Split('\n').Reverse())
-            {
-                if (!line.Contains("\"rate_limits\"")) continue;
-                object parsed; Dictionary<string, object> rl;
-                try { parsed = Store.Json.DeserializeObject(line); rl = Find(parsed); } catch { continue; }
-                if (rl == null) continue;
-                var hasWindow = (rl.TryGetValue("primary", out var pw) && pw != null) || (rl.TryGetValue("secondary", out var sw) && sw != null);
-                if (!hasWindow) continue;
-                var stamp = parsed is Dictionary<string, object> top && top.TryGetValue("timestamp", out var tsv) ? tsv as string ?? "" : "";
-                return (rl, stamp);
-            }
-            return (null, "");
-        }
-
-        // ---------------- WSL ----------------
-        // 在 WSL 里用 Codex 的人，记录写在 WSL 的 ~/.codex。访问 \\wsl.localhost 会把没开的发行版拉起来（很重），
-        // 所以只在 WSL 虚拟机开着时、只访问正在运行的发行版；找到的目录缓存 10 分钟
-        static List<string> wslHomes = new List<string>();
+        // ---------------- WSL 里的 Codex ----------------
+        // 在 WSL 里用 Codex 的人（含 Codex 桌面版「在 WSL 里运行」），登录状态在 WSL 那边，Windows 这边问不到：
+        // 通过 wsl.exe 在 WSL 里起 `codex app-server` 问。只在 WSL 已经开着时问（不把它拉起来，WSL 没开也不可能正在用它）；
+        // 在哪个发行版、codex 在哪，找一次缓存 10 分钟
+        static (string distro, string codex) wsl;
         static DateTime wslCheckedAt = DateTime.MinValue;
         public static string WslNote = "";
 
-        static IEnumerable<string> WslHomes()
+        public static async Task<(Dictionary<string, object> rateLimits, string error, int ms)> QueryWsl(int timeoutMs = 15000)
         {
-            bool vmUp;
-            try { vmUp = Running("vmmemWSL") || Running("vmmem"); } catch { vmUp = false; }
-            if (!vmUp) { WslNote = ""; return Array.Empty<string>(); }
-            if ((DateTime.UtcNow - wslCheckedAt).TotalMinutes < 10) return wslHomes;
-            wslCheckedAt = DateTime.UtcNow;
-            var found = new List<string>();
+            var (distro, codex) = FindWslCodex();
+            if (distro == null) return (null, null, 0);   // 没有开着的 WSL / WSL 里没有 codex：不算出错
+            // bash -lic：登录 + 交互，npm / nvm 装的 codex 才在 PATH 里；.bashrc 往输出里打的东西会被当成非 JSON 跳过
+            return await Query("wsl.exe", $"-d {distro} -e bash -lic \"exec '{codex}' app-server\"", timeoutMs);
+        }
+
+        static (string distro, string codex) FindWslCodex()
+        {
+            if (!(Running("vmmemWSL") || Running("vmmem"))) { WslNote = ""; return (null, null); }
+            if ((DateTime.UtcNow - wslCheckedAt).TotalMinutes < 10) return wsl;
+            wslCheckedAt = DateTime.UtcNow; wsl = (null, null); WslNote = "";
+            foreach (var d in Run("wsl.exe", "-l --running -q", Encoding.Unicode).Replace("\0", "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0))
+            {
+                var path = Run("wsl.exe", $"-d {d} -e bash -lic \"command -v codex\"", Encoding.UTF8)
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).LastOrDefault(x => x.StartsWith("/"));
+                if (path == null) continue;
+                wsl = (d, path); WslNote = $"WSL {d}";
+                break;
+            }
+            return wsl;
+        }
+
+        /// 跑一个小命令拿输出（最多等 8 秒）
+        static string Run(string file, string args, Encoding enc)
+        {
             try
             {
-                var psi = new ProcessStartInfo("wsl.exe", "-l --running -q") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.Unicode };
+                var psi = new ProcessStartInfo(file, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = enc };
                 using (var p = Process.Start(psi))
                 {
-                    var outTask = p.StandardOutput.ReadToEndAsync();
-                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } }
-                    var distros = (outTask.Wait(1000) ? outTask.Result : "").Replace("\0", "")
-                        .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(d => d.Trim()).Where(d => d.Length > 0).ToList();
-                    foreach (var d in distros)
-                        try
-                        {
-                            foreach (var u in Directory.GetDirectories($@"\\wsl.localhost\{d}\home"))
-                                if (Directory.Exists(Path.Combine(u, ".codex", "sessions"))) found.Add(Path.Combine(u, ".codex"));
-                        }
-                        catch { }
+                    p.ErrorDataReceived += (_, __) => { }; p.BeginErrorReadLine();
+                    var t = p.StandardOutput.ReadToEndAsync();
+                    if (!p.WaitForExit(8000)) KillTree(p);
+                    return t.Wait(1000) ? t.Result : "";
                 }
             }
-            catch { }
-            wslHomes = found;
-            WslNote = found.Count == 0 ? "" : "，含 WSL：" + string.Join("、", found.Select(h => h.Replace(@"\\wsl.localhost\", "")));
-            return wslHomes;
+            catch { return ""; }
         }
 
         static bool Running(string name)
@@ -252,16 +216,5 @@ namespace CrossPet
         }
 
         static bool IsNumber(object v) => v is int || v is long || v is double || v is decimal;
-
-        static Dictionary<string, object> Find(object o)
-        {
-            if (o is Dictionary<string, object> d)
-            {
-                if (d.TryGetValue("rate_limits", out var rl) && rl is Dictionary<string, object> r) return r;
-                foreach (var v in d.Values) { var f = Find(v); if (f != null) return f; }
-            }
-            else if (o is object[] arr) foreach (var v in arr) { var f = Find(v); if (f != null) return f; }
-            return null;
-        }
     }
 }

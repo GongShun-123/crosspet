@@ -446,49 +446,59 @@ namespace CrossPet
         // ---- GPT 额度：什么时候拿、从哪拿（来源见 CodexQuota.cs，规则见 docs/superpowers/specs/2026-10-12-codex-quota-design.md）----
         enum CodexWhy { Now, TurnEnd, Tick }
         DateTime codexLiveAt = DateTime.MinValue;       // 上次问服务的时间（不管成没成）
-        DateTime codexRecordsAt = DateTime.MinValue;    // 上次读记录的时间：服务不通时也最多每分钟读一次
-        bool codexLiveOK, codexInFlight, sessionLocked;
+        bool codexInFlight, sessionLocked;
+        Dictionary<string, object> codexLast; DateTime codexLastAt;   // 最后一次问到的额度：问不到时接着显示它，并标上时间
+        string codexNote = "";                           // 从没问到过时的原因，设置里那个开关下面显示
         string lastGptQuota = "还没读过", lastGptLogKey;
 
-        /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次服务，
-        /// 服务不通时每分钟读一次记录。藏着、锁屏时定时的不查
+        /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次。藏着、锁屏时定时的不查
         async void RefreshCodexQuota(CodexWhy why)
         {
             if (!ready || !Store.Flag("gptQuota") || codexInFlight) return;
             if (why == CodexWhy.Tick && (userHidden || sessionLocked)) return;
             var since = (DateTime.UtcNow - codexLiveAt).TotalSeconds;
-            var askLive = why == CodexWhy.Now || (why == CodexWhy.TurnEnd && since >= 20) || (why == CodexWhy.Tick && since >= 300);
-            if (!askLive && (codexLiveOK || (DateTime.UtcNow - codexRecordsAt).TotalSeconds < 55)) return;
-            // 找程序（枚举进程）、问服务、读记录（可能要探测 WSL、走网络盘）都放到后台，别卡住桌宠；同一时间只跑一个
-            codexInFlight = true;
+            var ask = why == CodexWhy.Now || (why == CodexWhy.TurnEnd && since >= 20) || (why == CodexWhy.Tick && since >= 300);
+            if (!ask) return;
+            // 找程序（枚举进程）、问服务（可能要经过 WSL）都放到后台，别卡住桌宠；同一时间只跑一个
+            codexInFlight = true; codexLiveAt = DateTime.UtcNow;
             try
             {
-                if (!askLive) { await ApplyCodex("records", null, null, 0); return; }   // 服务不通：每分钟读记录
-                codexLiveAt = DateTime.UtcNow;
                 var bin = await Task.Run(() => CodexQuota.FindBinary());
-                if (bin == null) { codexLiveOK = false; await ApplyCodex("records", null, "没找到 codex 程序", 0); return; }
-                var (rl, err, ms) = await Task.Run(() => CodexQuota.QueryLive(bin));
-                codexLiveOK = rl != null;
-                if (err != null && err.StartsWith("起不来")) CodexQuota.Forget();   // 程序可能被更新挪走了，下次重新找
-                await ApplyCodex(rl != null ? "live" : "records", rl, err, ms);
+                (Dictionary<string, object> rl, string err, int ms) r = (null, "没找到 codex 程序", 0);
+                var via = "";
+                if (bin != null)
+                {
+                    r = await Task.Run(() => CodexQuota.QueryLive(bin));
+                    if (r.err != null && r.err.StartsWith("起不来")) CodexQuota.Forget();   // 程序可能被更新挪走了，下次重新找
+                }
+                if (r.rl == null)
+                {
+                    // Windows 这边问不到（没装、没登录）：WSL 开着的话在 WSL 里问
+                    var w = await Task.Run(() => CodexQuota.QueryWsl());
+                    if (w.rateLimits != null || w.error != null) { r = (w.rateLimits, w.rateLimits != null ? null : $"{r.err}；{CodexQuota.WslNote}：{w.error}", w.ms); via = CodexQuota.WslNote; }
+                }
+                ApplyCodex(r.rl, r.err, r.ms, via);
             }
             catch (Exception e) { Store.Log("GPT 额度: " + e.Message); }
             finally { codexInFlight = false; }
         }
 
-        /// 交给网页；records 来源时这里现读记录（rl 传 null）
-        async Task ApplyCodex(string source, Dictionary<string, object> rl, string error, int ms)
+        /// 交给网页：问到了就是 live；没问到、但以前问到过，就接着显示最后一次的数（stale，网页标上是几点的数据）；从没问到过就不显示
+        void ApplyCodex(Dictionary<string, object> rl, string error, int ms, string via)
         {
-            if (!Store.Flag("gptQuota")) return;
-            if (source == "records") { codexRecordsAt = DateTime.UtcNow; rl = await Task.Run(() => CodexQuota.Records()); if (rl == null) source = "none"; }
             if (!Store.Flag("gptQuota")) return;   // 查的途中关掉了额度显示
-            var tag = source == "live" ? $"Codex 服务，{ms / 1000.0:0.0} 秒" : source == "records" ? "本机记录" + CodexQuota.WslNote : "没读到";
-            lastGptQuota = $"{DateTime.Now:HH:mm:ss} （{tag}{(error != null ? "；服务：" + error : "")}）" + (rl != null ? CodexQuota.Brief(rl) : "");
+            if (rl != null) { codexLast = rl; codexLastAt = DateTime.Now; codexNote = ""; }
+            else if (codexLast == null) codexNote = "问不到 Codex：" + (error ?? "原因不明");
+            var tag = rl != null ? $"Codex 服务{(via != "" ? "（" + via + "）" : "")}，{ms / 1000.0:0.0} 秒" : "没问到：" + (error ?? "原因不明");
+            lastGptQuota = $"{DateTime.Now:HH:mm:ss} （{tag}）" + (codexLast != null ? (rl == null ? $"沿用 {codexLastAt:HH:mm} 的数：" : "") + CodexQuota.Brief(codexLast) : "");
             // 来源或出错原因变了才记日志（每 5 分钟查一次，照记会刷屏）：反馈附带的日志里能看出额度从哪来、为什么没问到
-            var logKey = source + "|" + error;
+            var logKey = (rl != null) + "|" + via + "|" + error;
             if (logKey != lastGptLogKey) { lastGptLogKey = logKey; Store.Log("GPT 额度：" + lastGptQuota.Substring(9)); }
-            if (source == "none") return;
-            Js($"setCodexQuota({Store.Json.Serialize(CodexQuota.Payload(source, rl, error, ms))})");
+            settings?.Push();
+            if (codexLast == null) { Js("setCodexQuota(null)"); return; }
+            var p = CodexQuota.Payload(rl != null ? "live" : "stale", codexLast, error, ms);
+            p["at"] = new DateTimeOffset(codexLastAt).ToUnixTimeSeconds();
+            Js($"setCodexQuota({Store.Json.Serialize(p)})");
         }
         bool askingGemini;
         async Task RefreshGeminiQuota()
@@ -992,7 +1002,7 @@ namespace CrossPet
                 ["version"] = Store.Version + " Windows", ["platform"] = "windows",
                 ["size"] = Scale, ["showName"] = ShowName, ["eggs"] = EggsEnabled, ["hideFullscreen"] = HideFullscreen, ["aura"] = AuraMode,
                 ["followApps"] = Store.Flag("followApps"), ["followEvents"] = Store.Flag("followEvents"),
-                ["gptQuota"] = Store.Flag("gptQuota"), ["agyQuota"] = Store.Flag("agyQuota"),
+                ["gptQuota"] = Store.Flag("gptQuota"), ["agyQuota"] = Store.Flag("agyQuota"), ["gptQuotaNote"] = codexNote,
                 ["login"] = LoginEnabled, ["edgeDock"] = EdgeDockEnabled, ["dsQuota"] = DsQuotaEnabled, ["powerSave"] = PowerSave,
                 ["hideHotkey"] = HideHotkey, ["hotkeyFailed"] = hotkeyFailed,
                 ["hotkeys"] = new[] { new Dictionary<string, object> { ["id"] = "off", ["label"] = "不用快捷键" } }.Concat(HotkeyChoices.Select(h => new Dictionary<string, object> { ["id"] = h.id, ["label"] = h.label })).ToList(), ["aiAutostart"] = AIAutostart, ["character"] = current, ["updating"] = updating,
