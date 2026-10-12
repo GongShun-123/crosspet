@@ -20,7 +20,7 @@ using Forms = System.Windows.Forms;
 namespace CrossPet
 {
     /// <summary>
-    /// 桌宠本体。和 macOS 版 CrossPet.swift 做的事一样：一个透明、置顶、不抢焦点的小窗口里放桌宠网页（app/web/index.html），
+    /// 桌宠本体。和 macOS 版（app/mac/）做的事一样：一个透明、置顶、不抢焦点的小窗口里放桌宠网页（app/web/index.html），
     /// 读 AI 写来的状态文件交给网页演，跟着前台程序换角色，右键菜单 / 托盘 / 接入 AI / 额度 / 检查更新。
     /// 网页用 WebView2CompositionControl：它把网页画面当图片放进 WPF 透明窗口，才能做到逐像素半透明（柔和边缘、光晕）。
     /// </summary>
