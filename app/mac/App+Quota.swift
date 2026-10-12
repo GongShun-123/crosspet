@@ -1,0 +1,162 @@
+import Carbon
+import Cocoa
+import ServiceManagement
+import WebKit
+
+extension App {
+    // MARK: GPT 额度（可选，默认关）：什么时候拿、从哪拿（来源见文件末尾 CodexQuotaSource）
+    enum CodexWhy { case now, turnEnd, tick }
+
+    /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次。
+    /// 藏着、屏幕休眠时定时的不查
+    func refreshCodexQuota(_ why: CodexWhy) {
+        guard ready, defaults.bool(forKey: "gptQuota"), !codexInFlight else { return }
+        if why == .tick && (screensAsleep || userHidden) { return }
+        let since = Date().timeIntervalSince(codexLiveAt)
+        let askLive: Bool
+        switch why {
+        case .now: askLive = true
+        case .turnEnd: askLive = since >= 20
+        case .tick: askLive = since >= 300
+        }
+        if !askLive { return }
+        codexLiveAt = Date()
+        codexInFlight = true
+        // 找程序可能要起一次登录 shell，放到后台，别卡住桌宠。程序被更新挪走的话 findBinary 下次会发现路径不在、重新找
+        DispatchQueue.global(qos: .utility).async {
+            let finish = { (rl: [String: Any]?, err: String?, ms: Int) in
+                DispatchQueue.main.async {
+                    self.codexInFlight = false
+                    self.applyCodex(rateLimits: rl, error: err, ms: ms)
+                }
+            }
+            guard let bin = CodexQuotaSource.findBinary() else { finish(nil, "没找到 codex 程序", 0); return }
+            CodexQuotaSource.queryLive(binary: bin, done: finish)
+        }
+    }
+
+    /// 交给网页：问到了就是 live；没问到、但以前问到过，就接着显示最后一次的数（stale，网页标上是几点的数据）；从没问到过就不显示
+    func applyCodex(rateLimits: [String: Any]?, error: String?, ms: Int) {
+        guard defaults.bool(forKey: "gptQuota") else { return }   // 查的途中关掉了额度显示
+        if let rl = rateLimits { codexLast = (rl, Date()); codexNote = "" }
+        else if codexLast == nil { codexNote = "问不到 Codex：\(error ?? "原因不明")" }
+        let tag = rateLimits != nil ? "Codex 服务，\(String(format: "%.1f", Double(ms) / 1000)) 秒" : "没问到：\(error ?? "原因不明")"
+        lastGptQuota = "\(Self.clock()) （\(tag)）" + (codexLast.map { (rateLimits == nil ? "沿用 \(Self.hm($0.at)) 的数：" : "") + CodexQuotaSource.brief($0.rateLimits) } ?? "")
+        pushSettings()
+        guard let last = codexLast else { js("setCodexQuota(null)"); return }
+        var p = CodexQuotaSource.payload(source: rateLimits != nil ? "live" : "stale", rateLimits: last.rateLimits, error: error, ms: ms)
+        p["at"] = last.at.timeIntervalSince1970
+        guard let d = try? JSONSerialization.data(withJSONObject: p), let arg = String(data: d, encoding: .utf8) else { return }
+        js("setCodexQuota(\(arg))")
+    }
+
+    // MARK: Gemini 额度（可选，默认关）
+    // Antigravity 在本机跑着一个后台服务（language_server），它自己的界面就是向它要额度的。
+    // 这里做同样的事：从它的启动参数里取本机接口的防伪令牌（每次启动随机生成、只在本机有效，不是账号凭据），
+    // 只调「用户状态」接口、只取额度数字；令牌只在内存里用，不存盘、不外传。Antigravity 没开就不显示。
+
+    func refreshAntigravityQuota() {
+        guard ready, defaults.bool(forKey: "agyQuota") else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            guard let (pid, token) = self.antigravityServer() else {
+                DispatchQueue.main.async { self.js("setQuota('gemini', null)") }
+                return
+            }
+            let ports = self.agyPort?.pid == pid ? [self.agyPort!.port] : self.listeningPorts(pid)
+            self.askAntigravity(pid: pid, token: token, ports: ports)
+        }
+    }
+
+    /// 找到 Antigravity 的 language_server 进程，返回 (pid, 令牌)
+    func antigravityServer() -> (Int32, String)? {
+        guard let out = run("/bin/ps", ["-axo", "pid=,command="]) else { return nil }
+        for line in out.split(separator: "\n") where line.contains("Antigravity.app/Contents/Resources/bin/language_server") {
+            let parts = line.split(separator: " ").map(String.init)
+            guard let pid = Int32(parts.first ?? "") else { continue }
+            for (i, a) in parts.enumerated() {
+                if a.hasPrefix("--csrf_token=") { return (pid, String(a.dropFirst("--csrf_token=".count))) }
+                if a == "--csrf_token", i + 1 < parts.count { return (pid, parts[i + 1]) }
+            }
+        }
+        return nil
+    }
+
+    func listeningPorts(_ pid: Int32) -> [Int] {
+        guard let out = run("/usr/sbin/lsof", ["-nP", "-a", "-p", "\(pid)", "-iTCP", "-sTCP:LISTEN"]) else { return [] }
+        return out.split(separator: "\n").dropFirst().compactMap { line in
+            line.split(separator: " ").first { $0.contains("127.0.0.1:") }.flatMap { Int($0.split(separator: ":").last ?? "") }
+        }
+    }
+
+    func run(_ path: String, _ args: [String]) -> String? {
+        let p = Process(), pipe = Pipe()
+        p.executableURL = URL(fileURLWithPath: path); p.arguments = args
+        p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: data, encoding: .utf8)
+    }
+
+    func askAntigravity(pid: Int32, token: String, ports: [Int]) {
+        guard let port = ports.first else { return }
+        var req = URLRequest(url: URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/GetUserStatus")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(token, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+        req.httpBody = #"{"metadata":{"ideName":"antigravity","extensionName":"antigravity","locale":"en"}}"#.data(using: .utf8)
+        if agySession == nil { agySession = URLSession(configuration: .ephemeral, delegate: LocalhostTrust(), delegateQueue: nil) }
+        agySession!.dataTask(with: req) { [weak self] data, resp, _ in
+            guard let self else { return }
+            guard (resp as? HTTPURLResponse)?.statusCode == 200, let data,
+                  let obj = try? JSONSerialization.jsonObject(with: data), let q = Self.antigravityQuota(obj) else {
+                self.agyPort = nil
+                self.askAntigravity(pid: pid, token: token, ports: Array(ports.dropFirst()))  // 换下一个端口试
+                return
+            }
+            self.agyPort = (pid, port)
+            guard let json = try? JSONSerialization.data(withJSONObject: q), let arg = String(data: json, encoding: .utf8) else { return }
+            DispatchQueue.main.async { self.js("setQuota('gemini', \(arg))") }
+        }.resume()
+    }
+
+    /// 额度按「额度池」共享（比如所有 Gemini 模型一个池，Claude 和 GPT-OSS 一个池）：
+    /// 按 (剩余比例, 重置时间) 分组，每组用模型家族名命名，Gemini 池排前面。
+    /// 不写死「5 小时 / 每周」：24 小时内重置显示时刻，否则显示日期，免费版和会员都适用。
+    static func antigravityQuota(_ obj: Any) -> [String: Any]? {
+        guard let st = (obj as? [String: Any])?["userStatus"] as? [String: Any],
+              let cfg = st["cascadeModelConfigData"] as? [String: Any],
+              let models = cfg["clientModelConfigs"] as? [[String: Any]] else { return nil }
+        var pools: [(key: String, left: Double, reset: Date?, families: [String])] = []
+        let iso = ISO8601DateFormatter()
+        for m in models {
+            guard let qi = m["quotaInfo"] as? [String: Any] else { continue }
+            let left = (qi["remainingFraction"] as? NSNumber)?.doubleValue ?? 0  // 用完时这个字段会被省略
+            let resetText = qi["resetTime"] as? String ?? ""
+            let family = (m["label"] as? String ?? "").split(separator: " ").first.map(String.init) ?? "?"
+            let key = "\(left)|\(resetText)"
+            if let i = pools.firstIndex(where: { $0.key == key }) {
+                if !pools[i].families.contains(family) { pools[i].families.append(family) }
+            } else {
+                pools.append((key, left, iso.date(from: resetText), [family]))
+            }
+        }
+        guard !pools.isEmpty else { return nil }
+        pools.sort { ($0.families.contains("Gemini") ? 0 : 1, $0.left) < ($1.families.contains("Gemini") ? 0 : 1, $1.left) }
+        let minLeft = pools.map { $0.left }.min() ?? 1
+        let fmt = DateFormatter()
+        let parts = pools.enumerated().map { i, p -> String in
+            var piece = "\(p.families.joined(separator: "/")) 剩余 \(Int((p.left * 100).rounded()))%"
+            // 重置时间标在排第一的池（有 Gemini 时就是 Gemini 池）上；别的池快用完了也标
+            if i == 0 || p.left <= 0.1, let d = p.reset {
+                fmt.dateFormat = d.timeIntervalSinceNow < 86400 ? "HH:mm" : "M/d"
+                piece += " · \(fmt.string(from: d)) 重置"
+            }
+            return piece
+        }
+        return ["text": parts.joined(separator: " ｜ "), "low": minLeft <= 0.1]
+    }
+
+}
