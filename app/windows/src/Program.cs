@@ -11,6 +11,31 @@ namespace CrossPet
     {
         const string WebView2Download = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
 
+        /// WPF 渲染线程挂了（0x88980406 UCEERR_RENDERTHREADFAILURE）：这之后窗口不会再重画，当作没事继续跑就是画面冻住
+        static bool IsRenderThreadFailure(Exception e)
+        {
+            for (var x = e; x != null; x = x.InnerException)
+                if ((uint)x.HResult == 0x88980406 || (x.Message ?? "").Contains("UCEERR_RENDERTHREADFAILURE")) return true;
+            return false;
+        }
+
+        /// 自动重启一次（位置、角色、设置都在设置文件里，重开就回来了）。2 分钟内最多一次，免得反复重启
+        static void RestartAfterRenderFailure()
+        {
+            var mark = Path.Combine(Store.Data, "render-restart.txt");
+            try
+            {
+                if (File.Exists(mark) && (DateTime.UtcNow - File.GetLastWriteTimeUtc(mark)).TotalMinutes < 2) { Store.Log("渲染线程又挂了，2 分钟内已经重启过一次，不再自动重启"); return; }
+                File.WriteAllText(mark, DateTime.Now.ToString("s"));
+                Store.Log("渲染线程挂了，自动重启 CrossPet");
+                // 等这个进程退出（单实例锁放开）再开新的：交给 cmd 等 2 秒
+                var exe = Path.Combine(Store.Install, "CrossPet.exe");
+                Process.Start(new ProcessStartInfo("cmd.exe", $"/d /c ping -n 3 127.0.0.1 >nul & start \"\" \"{exe}\"") { UseShellExecute = false, CreateNoWindow = true });
+            }
+            catch (Exception e) { Store.Log("自动重启失败: " + e.Message); return; }
+            Environment.Exit(0);
+        }
+
         [STAThread]
         static void Main()
         {
@@ -28,7 +53,12 @@ namespace CrossPet
                 System.Windows.Forms.Application.EnableVisualStyles();
 
                 var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-                app.DispatcherUnhandledException += (_, e) => { Store.Log("界面异常: " + e.Exception); e.Handled = true; };
+                app.DispatcherUnhandledException += (_, e) =>
+                {
+                    Store.Log("界面异常: " + e.Exception);
+                    e.Handled = true;
+                    if (IsRenderThreadFailure(e.Exception)) RestartAfterRenderFailure();
+                };
 
                 // WebView2 运行时：Windows 11 自带；老的 Windows 10 可能没有，指引去微软官网装
                 string version;

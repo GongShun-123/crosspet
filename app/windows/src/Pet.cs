@@ -100,7 +100,7 @@ namespace CrossPet
             foreground = new Native.ForegroundWatcher(() =>
             {
                 fullscreenOverride = false;   // 前台窗口换了：双击托盘临时叫出来的作废，重新按全屏规则来
-                if (hwnd != IntPtr.Zero && Window.Topmost) Native.BringToTop(hwnd);
+                if (hwnd != IntPtr.Zero) Raise();
                 appSwitch.Stop(); appSwitch.Start();
             });
 
@@ -114,8 +114,8 @@ namespace CrossPet
                     Window.Dispatcher.BeginInvoke(new Action(() =>
                     {
                         var locked = e.Reason == SessionSwitchReason.SessionLock;
-                        Js($"setPageHidden({(locked ? "true" : "false")})");
                         var wasLocked = sessionLocked; sessionLocked = locked;
+                        UpdatePageHidden();
                         if (wasLocked && !locked) RefreshCodexQuota(CodexWhy.Tick);   // 锁屏时没查：解锁补一次（自带间隔，不会多问）
                     }));
             };
@@ -349,6 +349,23 @@ namespace CrossPet
                 : (now - p.at).TotalSeconds < 8 && (p.pose == "happy" || p.pose == "proud"));
         }
 
+        // ---- 藏起来 / 露出来 ----
+        // 不用 Window.Hide() / Show()：透明分层窗口里嵌着显卡渲染的 WebView2，反复藏和放有概率让 WPF 的渲染线程挂掉
+        // （0x88980406 UCEERR_RENDERTHREADFAILURE），之后画面冻住、摸头没反应，只有网页还在跑（1.3.2 用户反馈）。
+        // 改成「隐身」：窗口一直开着，不透明度 0（透明分层窗口全透明的地方鼠标直接穿过去）、取消置顶（不压在全屏游戏 / 视频上面），网页动画暂停
+        bool concealed;
+        void SetConcealed(bool c)
+        {
+            if (Window == null || concealed == c) return;
+            concealed = c;
+            if (c) { Window.Opacity = 0; if (hwnd != IntPtr.Zero) Native.DropFromTop(hwnd); }
+            else { Window.Opacity = 1; Raise(); }
+            UpdatePageHidden();
+        }
+        /// 置顶（层级要求置顶、又没在隐身时）
+        void Raise() { if (!concealed && Window.Topmost && hwnd != IntPtr.Zero) Native.BringToTop(hwnd); }
+        void UpdatePageHidden() => Js($"setPageHidden({(concealed || sessionLocked ? "true" : "false")})");
+
         void ApplyLayer()
         {
             if (Window == null || hwnd == IntPtr.Zero) return;
@@ -359,14 +376,14 @@ namespace CrossPet
             {
                 hiddenForFullscreen = hide;
                 Store.Log(hide ? $"全屏中，先藏起来（前台 {Native.ForegroundExe()}）" : "退出全屏，出来了");
-                if (hide) Window.Hide(); else { Window.Show(); if (Window.Topmost) Native.BringToTop(hwnd); }
+                SetConcealed(hide);
             }
             var top = LayerMode == "always" || (LayerMode == "ai" && AIActive());
             if (Window.Topmost == top || surfacing) return;
             // 原本被别的窗口挡着、要浮上来：先藏起来，换完层级再淡入（没被挡住就直接换，免得闪一下）
             if (top && !hiddenForFullscreen && Native.Covered(hwnd)) { _ = Surface(); return; }
             Window.Topmost = top;
-            if (top) Native.BringToTop(hwnd); else Native.DropFromTop(hwnd);
+            if (!top) Native.DropFromTop(hwnd); else Raise();
         }
 
         bool surfacing;
@@ -378,7 +395,7 @@ namespace CrossPet
                 await Eval("sink()");
                 await Task.Delay(50);
                 Window.Topmost = true;
-                Native.BringToTop(hwnd);
+                Raise();
             }
             finally
             {
@@ -715,7 +732,7 @@ namespace CrossPet
             else { var wa = Forms.Screen.PrimaryScreen.WorkingArea; x = wa.Right - w - 40; y = wa.Bottom - h - 100; }
             var (cx, cy) = Clamp(x, y, w, h);
             Native.MoveTo(hwnd, cx, cy);
-            if (Window.Topmost) Native.BringToTop(hwnd);
+            Raise();
         }
         static (int, int) Clamp(int x, int y, int w, int h)
         {
@@ -756,14 +773,8 @@ namespace CrossPet
         void SetUserHidden(bool hidden)
         {
             userHidden = hidden;
-            if (hidden) Window.Hide();
-            else
-            {
-                fullscreenOverride = true; hiddenForFullscreen = false;
-                Window.Show();
-                if (Window.Topmost) Native.BringToTop(hwnd);
-            }
-            Js($"setPageHidden({(hidden ? "true" : "false")})");
+            if (!hidden) { fullscreenOverride = true; hiddenForFullscreen = false; }
+            SetConcealed(hidden);
             if (!hidden) RefreshCodexQuota(CodexWhy.Tick);   // 藏着时没查：叫回来补一次（自带间隔，不会多问）
         }
 
@@ -774,8 +785,7 @@ namespace CrossPet
             RestorePosition();
             if (userHidden) SetUserHidden(false);   // 快捷键藏起来的：一起恢复（包括动画）
             fullscreenOverride = true; hiddenForFullscreen = false;   // 你主动叫她：全屏时也出来，前台窗口换了再按规则藏
-            Window.Show();
-            if (Window.Topmost) Native.BringToTop(hwnd);
+            SetConcealed(false);
         }
         bool fullscreenOverride;
 
@@ -1190,7 +1200,7 @@ namespace CrossPet
             try
             {
                 L.Add($"前台程序 {Native.ForegroundExe()}");
-                var vis = Window?.IsVisible == true;
+                var vis = Window?.IsVisible == true && !concealed;   // 隐身（全屏 / 快捷键藏起来）也算不显示
                 var rect = "";
                 if (hwnd != IntPtr.Zero && Native.GetWindowRect(hwnd, out var r))
                 {
@@ -1233,7 +1243,7 @@ namespace CrossPet
                 if (hwnd != IntPtr.Zero && Native.GetWindowRect(hwnd, out var wr))
                 {
                     var onAny = all.Any(sc => sc.WorkingArea.IntersectsWith(new System.Drawing.Rectangle(wr.Left + 40, wr.Top + 40, Math.Max(1, wr.Right - wr.Left - 80), Math.Max(1, wr.Bottom - wr.Top - 80))));
-                    flags.Add($"窗口 {wr.Left},{wr.Top} {wr.Right - wr.Left}×{wr.Bottom - wr.Top}{(onAny ? "" : "（不在任何屏幕里）")}{(Window.IsVisible ? "" : "（隐藏）")}");
+                    flags.Add($"窗口 {wr.Left},{wr.Top} {wr.Right - wr.Left}×{wr.Bottom - wr.Top}{(onAny ? "" : "（不在任何屏幕里）")}{(Window.IsVisible && !concealed ? "" : "（隐藏）")}");
                 }
                 return $"{all.Length} 块：{string.Join("、", parts)}；{string.Join("，", flags)}";
             }
