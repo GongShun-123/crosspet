@@ -31,7 +31,7 @@ Codex 自带一个本地服务 `codex app-server`（Codex 桌面版就是通过�
 ### 1. 两个来源，一个结果
 
 1. **主来源：问 Codex 本地服务。** 找到 `codex` 程序 → 起 `codex app-server`（stdio）→ `initialize`（clientInfo `crosspet`）→ `initialized` → `account/rateLimits/read` → 关掉进程。整个过程 15 秒超时，超时就杀进程。
-2. **备用来源：本机会话记录（现在的做法）。** 找不到 `codex` 程序、返回错误（没登录、断网、旧版 Codex 没有这个接口）、超时时才用。两个平台都按 `CODEX_HOME`（没设就是 `~/.codex`）找记录，都按每条记录自带的 `timestamp` 挑最新的。
+2. **备用来源：本机会话记录（现在的做法）。** 找不到 `codex` 程序、返回错误（没登录、断网、旧版 Codex 没有这个接口）、超时时才用。两个平台都按 `CODEX_HOME`（没设就是 `~/.codex`）找记录；Windows 上还加上 WSL 里的记录（见第 2.1 节）。所有记录放在一起，按每条记录自带的 `timestamp` 挑最新的。
 3. 两个来源都整理成同一个结构交给网页（不变）：`{ text, low, windows: [{label, used, reset}] }`，另加 `source: "live" | "records"`。
 
 ### 2. 找 `codex` 程序
@@ -42,6 +42,18 @@ Codex 自带一个本地服务 `codex app-server`（Codex 桌面版就是通过�
 - **Windows**：`PATH` 里的 `codex.exe` / `codex.cmd`（npm 装的）→ Codex 桌面版自带的位置（**待查**：作者没有 Windows 版 Codex，先在诊断里列出找到的候选，实测后补进来）
 
 `codex` 程序继承 CrossPet 的环境变量（含 `CODEX_HOME`）。
+
+### 2.1 WSL 里的 Codex（Windows）
+
+在 WSL 里用 Codex 的人（含 Codex 桌面版「在 WSL 里运行」），会话记录写在 WSL 的 `~/.codex/sessions`，Windows 这边只剩旧记录。这类用户 Windows 这边通常没登录 Codex，主来源会失败、退回备用来源，所以备用来源要能读到 WSL 那边：
+
+- **只在 WSL 已经开着时读。** 访问 `\\wsl.localhost\<发行版>\...` 会把没开的发行版拉起来（很重），所以：
+  1. 先看 WSL 的虚拟机进程（`vmmemWSL`，老版本叫 `vmmem`）在不在，不在就整个跳过——WSL 没开，也就不可能正在用 WSL 里的 Codex
+  2. 在的话跑一次 `wsl.exe -l --running -q` 拿到**正在运行**的发行版，只访问这些
+- **有哪些 Codex 目录：** 在运行的发行版里找 `\\wsl.localhost\<发行版>\home\*\.codex\sessions`，结果缓存 10 分钟（发行版列表和目录都缓存），不每分钟都翻
+- **读法和 Windows 这边一样：** 最近 4 天的会话里挑修改 / 创建时间最新的几个，读末尾，取带时间戳的最新额度记录，和 Windows 这边的记录一起比
+- 显示同样带「 · 本机记录」；诊断里写清读到的是哪个发行版的记录
+- 读失败（权限、路径不存在、WSL 中途关了）就当没有，不报错、不重试到卡住
 
 ### 3. 什么时候查
 
@@ -75,7 +87,7 @@ Codex 自带一个本地服务 `codex app-server`（Codex 桌面版就是通过�
 
 ## 不在这次范围
 
-- **WSL 里的 Codex**：Windows 这边没装 Codex、只在 WSL 里装了时，通过 `wsl.exe` 在 WSL 里起 `codex app-server`。可行，但要处理「WSL 没开时别把它拉起来」，放第二步。这一步至少让诊断写清「Codex 在 WSL 里，额度要等第二步」
+- 通过 `wsl.exe` 在 WSL 里起 `codex app-server` 查实时额度（WSL 用户这次先靠第 2.1 节读 WSL 里的记录）
 - WSL 里的 Codex 干活时跟着动（钩子要装进 WSL 并跨系统写状态）
 - 显示重置卡张数、积分余额
 
@@ -85,4 +97,5 @@ Codex 自带一个本地服务 `codex app-server`（Codex 桌面版就是通过�
 - 找不到程序 / 超时 / 返回错误时退回备用来源，显示带「本机记录」
 - macOS 真机：开关额度、Codex 对话一轮、等 5 分钟、藏起来时不查（看日志里查询次数）
 - Windows：在 loki 的 Windows 电脑上看诊断列出的 `codex` 程序，再验证同样几项
+- WSL：模拟 `\\wsl.localhost` 下的会话目录验证合并挑选；WSL 没开时确认不访问（不拉起发行版）；在有 WSL 的 Windows 上实测（loki 的 Windows 或反馈用户）
 - 回归：1.3.2 的「干活途中刷新 → 干完演 reset」不受影响
