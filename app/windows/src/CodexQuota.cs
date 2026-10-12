@@ -23,21 +23,28 @@ namespace CrossPet
             if (!string.IsNullOrEmpty(o)) return File.Exists(o) ? o : null;
             if (cached != null && File.Exists(cached)) return cached;
             cached = null;
-            // Codex 桌面版开着时，它自己的 codex.exe 在跑：用它（装在受保护目录里也能拿到路径），记下来下次直接用
+            // Codex 桌面版开着时，它自带的命令行 codex.exe 在跑：用它（装在受保护目录里也能拿到路径），记下来下次直接用。
+            // 桌面版的图形界面程序可能也叫 Codex.exe（名字不分大小写），起它会弹窗口：认出来跳过
             try
             {
                 foreach (var p in Process.GetProcessesByName("codex"))
-                    try
-                    {
-                        var f = p.MainModule?.FileName;
-                        if (f == null || !File.Exists(f)) continue;
-                        if (!(Store.Settings.TryGetValue("codexBin", out var old) && old as string == f)) { Store.Settings["codexBin"] = f; Store.SaveSettings(); }
-                        return cached = f;
-                    }
-                    catch { }
+                    using (p)
+                        try
+                        {
+                            var f = p.MainModule?.FileName;
+                            if (f == null || !File.Exists(f) || !LooksLikeCli(f)) continue;
+                            if (SavedBin() != f) OnUi(() => { Store.Settings["codexBin"] = f; Store.SaveSettings(); });
+                            return cached = f;
+                        }
+                        catch { }
             }
             catch { }
-            if (Store.Settings.TryGetValue("codexBin", out var s) && s is string saved && File.Exists(saved)) return cached = saved;
+            var saved = SavedBin();
+            if (saved != null)
+            {
+                if (File.Exists(saved) && LooksLikeCli(saved)) return cached = saved;
+                OnUi(() => { Store.Settings.Remove("codexBin"); Store.SaveSettings(); });
+            }
             foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
                 foreach (var name in new[] { "codex.exe", "codex.cmd" })
                     try { var f = Path.Combine(dir.Trim(), name); if (File.Exists(f)) return cached = f; } catch { }
@@ -45,8 +52,33 @@ namespace CrossPet
             return File.Exists(npm) ? cached = npm : null;
         }
 
-        /// 查询失败时调：程序可能被更新挪走了，下次重新找
+        // FindBinary 在后台线程跑：设置只在界面线程改，这里读的时候出错就当没有
+        static string SavedBin() { try { return Store.Settings.TryGetValue("codexBin", out var v) ? v as string : null; } catch { return null; } }
+        static void OnUi(Action a) { try { System.Windows.Application.Current?.Dispatcher.BeginInvoke(a); } catch { } }
+
+        /// 图形界面程序（Electron 做的桌面版）旁边有这些文件；命令行 codex.exe 旁边没有
+        static bool LooksLikeCli(string exe)
+        {
+            var dir = Path.GetDirectoryName(exe) ?? "";
+            return !(File.Exists(Path.Combine(dir, "resources.pak")) || File.Exists(Path.Combine(dir, "ffmpeg.dll"))
+                     || File.Exists(Path.Combine(dir, "icudtl.dat")) || File.Exists(Path.Combine(dir, "chrome_100_percent.pak")));
+        }
+
+        /// 起不来时调：程序可能被更新挪走了，下次重新找
         public static void Forget() { cached = null; }
+
+        /// 结束整棵进程树：npm 装的 codex.cmd 是 cmd.exe → node.exe → codex.exe，.NET Framework 的 Kill 只杀最外面一层
+        static void KillTree(Process p)
+        {
+            try
+            {
+                if (p.HasExited) return;
+                using (var k = Process.Start(new ProcessStartInfo("taskkill.exe", $"/T /F /PID {p.Id}") { UseShellExecute = false, CreateNoWindow = true }))
+                    k?.WaitForExit(3000);
+            }
+            catch { }
+            try { if (!p.HasExited) p.Kill(); } catch { }
+        }
 
         public static async Task<(Dictionary<string, object> rateLimits, string error, int ms)> QueryLive(string binary, int timeoutMs = 15000)
         {
@@ -93,7 +125,7 @@ namespace CrossPet
                 return (rl2, err, (int)sw.ElapsedMilliseconds);
             }
             catch (Exception e) { return (null, "问 Codex 出错：" + e.Message, (int)sw.ElapsedMilliseconds); }
-            finally { try { if (!p.HasExited) p.Kill(); } catch { } p.Dispose(); }
+            finally { KillTree(p); p.Dispose(); }
         }
 
         /// 给网页的 payload（rateLimits 原样，不含账号标识——accountId 在 result 里，不在 rateLimits 里）
@@ -183,7 +215,7 @@ namespace CrossPet
         static IEnumerable<string> WslHomes()
         {
             bool vmUp;
-            try { vmUp = Process.GetProcessesByName("vmmemWSL").Length > 0 || Process.GetProcessesByName("vmmem").Length > 0; } catch { vmUp = false; }
+            try { vmUp = Running("vmmemWSL") || Running("vmmem"); } catch { vmUp = false; }
             if (!vmUp) { WslNote = ""; return Array.Empty<string>(); }
             if ((DateTime.UtcNow - wslCheckedAt).TotalMinutes < 10) return wslHomes;
             wslCheckedAt = DateTime.UtcNow;
@@ -210,6 +242,13 @@ namespace CrossPet
             wslHomes = found;
             WslNote = found.Count == 0 ? "" : "，含 WSL：" + string.Join("、", found.Select(h => h.Replace(@"\\wsl.localhost\", "")));
             return wslHomes;
+        }
+
+        static bool Running(string name)
+        {
+            var ps = Process.GetProcessesByName(name);
+            foreach (var p in ps) p.Dispose();
+            return ps.Length > 0;
         }
 
         static bool IsNumber(object v) => v is int || v is long || v is double || v is decimal;

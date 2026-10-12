@@ -441,31 +441,30 @@ namespace CrossPet
             if (why == CodexWhy.Tick && (userHidden || sessionLocked)) return;
             var since = (DateTime.UtcNow - codexLiveAt).TotalSeconds;
             var askLive = why == CodexWhy.Now || (why == CodexWhy.TurnEnd && since >= 20) || (why == CodexWhy.Tick && since >= 300);
-            if (!askLive)
-            {
-                if (!codexLiveOK && (DateTime.UtcNow - codexRecordsAt).TotalSeconds >= 55) ApplyCodex("records", null, null, 0);
-                return;
-            }
-            codexLiveAt = DateTime.UtcNow;
-            var bin = CodexQuota.FindBinary();
-            if (bin == null) { codexLiveOK = false; ApplyCodex("records", null, "没找到 codex 程序", 0); return; }
+            if (!askLive && (codexLiveOK || (DateTime.UtcNow - codexRecordsAt).TotalSeconds < 55)) return;
+            // 找程序（枚举进程）、问服务、读记录（可能要探测 WSL、走网络盘）都放到后台，别卡住桌宠；同一时间只跑一个
             codexInFlight = true;
             try
             {
-                var (rl, err, ms) = await CodexQuota.QueryLive(bin);
+                if (!askLive) { await ApplyCodex("records", null, null, 0); return; }   // 服务不通：每分钟读记录
+                codexLiveAt = DateTime.UtcNow;
+                var bin = await Task.Run(() => CodexQuota.FindBinary());
+                if (bin == null) { codexLiveOK = false; await ApplyCodex("records", null, "没找到 codex 程序", 0); return; }
+                var (rl, err, ms) = await Task.Run(() => CodexQuota.QueryLive(bin));
                 codexLiveOK = rl != null;
-                if (rl == null) CodexQuota.Forget();   // 程序可能被更新挪走了，下次重新找
-                ApplyCodex(rl != null ? "live" : "records", rl, err, ms);
+                if (err != null && err.StartsWith("起不来")) CodexQuota.Forget();   // 程序可能被更新挪走了，下次重新找
+                await ApplyCodex(rl != null ? "live" : "records", rl, err, ms);
             }
             catch (Exception e) { Store.Log("GPT 额度: " + e.Message); }
             finally { codexInFlight = false; }
         }
 
         /// 交给网页；records 来源时这里现读记录（rl 传 null）
-        void ApplyCodex(string source, Dictionary<string, object> rl, string error, int ms)
+        async Task ApplyCodex(string source, Dictionary<string, object> rl, string error, int ms)
         {
+            if (!Store.Flag("gptQuota")) return;
+            if (source == "records") { codexRecordsAt = DateTime.UtcNow; rl = await Task.Run(() => CodexQuota.Records()); if (rl == null) source = "none"; }
             if (!Store.Flag("gptQuota")) return;   // 查的途中关掉了额度显示
-            if (source == "records") { codexRecordsAt = DateTime.UtcNow; rl = CodexQuota.Records(); if (rl == null) source = "none"; }
             var tag = source == "live" ? $"Codex 服务，{ms / 1000.0:0.0} 秒" : source == "records" ? "本机记录" + CodexQuota.WslNote : "没读到";
             lastGptQuota = $"{DateTime.Now:HH:mm:ss} （{tag}{(error != null ? "；服务：" + error : "")}）" + (rl != null ? CodexQuota.Brief(rl) : "");
             if (source == "none") return;

@@ -609,18 +609,18 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             return
         }
         codexLiveAt = Date()
-        guard let bin = CodexQuotaSource.findBinary() else {
-            codexLiveOK = false
-            applyCodex(source: "records", rateLimits: nil, error: "没找到 codex 程序", ms: 0); return
-        }
         codexInFlight = true
-        CodexQuotaSource.queryLive(binary: bin) { rl, err, ms in
-            DispatchQueue.main.async {
-                self.codexInFlight = false
-                self.codexLiveOK = rl != nil
-                if rl == nil { CodexQuotaSource.cachedBinary = nil }   // 程序可能被更新挪走了，下次重新找
-                self.applyCodex(source: rl != nil ? "live" : "records", rateLimits: rl, error: err, ms: ms)
+        // 找程序可能要起一次登录 shell，放到后台，别卡住桌宠。程序被更新挪走的话 findBinary 下次会发现路径不在、重新找
+        DispatchQueue.global(qos: .utility).async {
+            let finish = { (rl: [String: Any]?, err: String?, ms: Int) in
+                DispatchQueue.main.async {
+                    self.codexInFlight = false
+                    self.codexLiveOK = rl != nil
+                    self.applyCodex(source: rl != nil ? "live" : "records", rateLimits: rl, error: err, ms: ms)
+                }
             }
+            guard let bin = CodexQuotaSource.findBinary() else { finish(nil, "没找到 codex 程序", 0); return }
+            CodexQuotaSource.queryLive(binary: bin, done: finish)
         }
     }
 
@@ -1920,10 +1920,11 @@ enum CodexQuotaSource {
         if let o = ProcessInfo.processInfo.environment["CROSSPET_CODEX_BIN"] { return fm.isExecutableFile(atPath: o) ? o : nil }
         if let c = cachedBinary, fm.isExecutableFile(atPath: c) { return c }
         cachedBinary = nil
-        var list = ["/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"]
-        if let p = loginShellWhich("codex") { list.append(p) }
-        list += ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
-        cachedBinary = list.first { fm.isExecutableFile(atPath: $0) }
+        // 按顺序找，找到就停：大多数人有 ChatGPT 桌面版，就不用起登录 shell（.zprofile 里有 nvm、conda 的会慢）
+        let bundled = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex"
+        if fm.isExecutableFile(atPath: bundled) { cachedBinary = bundled; return bundled }
+        if let p = loginShellWhich("codex"), fm.isExecutableFile(atPath: p) { cachedBinary = p; return p }
+        cachedBinary = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"].first { fm.isExecutableFile(atPath: $0) }
         return cachedBinary
     }
 
@@ -1935,7 +1936,9 @@ enum CodexQuotaSource {
         let deadline = Date().addingTimeInterval(5)
         while p.isRunning && Date() < deadline { usleep(50_000) }
         if p.isRunning { p.terminate(); return nil }
-        let s = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        // .zprofile 可能往输出里打别的东西：取最后一行
+        let s = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
         return s.hasPrefix("/") ? s : nil
     }
 
@@ -2039,6 +2042,9 @@ enum CodexQuotaSource {
         return p
     }
 }
+
+// 往已经退出的子进程（codex app-server）写东西时，系统默认发 SIGPIPE 把整个 App 杀掉：忽略它，写失败只返回错误
+signal(SIGPIPE, SIG_IGN)
 
 // 测试用：只问一次 GPT 额度，打印 JSON 就退出（tests/codex_quota_probe.sh）；服务失败时和 App 一样退回读记录
 func probeResult(_ rl: [String: Any]?, _ err: String?, _ ms: Int) -> [String: Any] {

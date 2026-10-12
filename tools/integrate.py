@@ -955,6 +955,9 @@ def codex_programs() -> list:
     for c in cands:
         if c in seen_ or not os.path.isfile(c):
             continue
+        d = os.path.dirname(c)
+        if any(os.path.exists(os.path.join(d, m)) for m in ("resources.pak", "ffmpeg.dll", "icudtl.dat", "chrome_100_percent.pak")):
+            continue   # Codex 桌面版的图形界面程序（可能也叫 Codex.exe）：跑 --version 会弹窗口，跳过
         seen_.add(c)
         try:
             v = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=8).stdout.strip() or "版本未知"

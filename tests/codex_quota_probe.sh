@@ -23,6 +23,9 @@ check auth none "authentication"
 check nomethod none "method not found"
 check garbage none "超时"
 start=$(date +%s); check hang none "超时"; [ $(( $(date +%s) - start )) -le 8 ] || { echo "FAIL hang 超过 8 秒（超时没生效）"; fail=1; }
+# 对面一启动就退出：往它的 stdin 写东西不能把整个程序带崩（SIGPIPE），连跑 20 次
+crash=0; for i in $(seq 20); do CODEX_HOME="$EMPTY" CROSSPET_CODEX_BIN="$FAKE" FAKE_CODEX_MODE=exit "$BIN" --codex-quota-probe >/dev/null 2>&1 || crash=$((crash+1)); done
+[ $crash -eq 0 ] && echo "PASS exit-no-crash" || { echo "FAIL exit 崩了 $crash 次"; fail=1; }
 out=$(CODEX_HOME="$EMPTY" CROSSPET_CODEX_BIN=/nonexistent/codex "$BIN" --codex-quota-probe)
 echo "$out" | grep -q '"source":"none"' && echo "PASS missing-binary" || { echo "FAIL missing-binary $out"; fail=1; }
 # 备用来源：服务失败时读会话记录，挑时间戳最新的一条（不是文件最新的那个）

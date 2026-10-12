@@ -12,6 +12,15 @@ integrate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(integrate)
 
 class IntegrationTests(unittest.TestCase):
+    def test_codex_programs_skips_desktop_gui_exe(self):
+        # Codex 桌面版的图形界面程序旁边有 resources.pak 等文件：不能当命令行跑 --version（会弹窗口）
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / 'codex'
+            exe.write_text('#!/bin/sh\necho should-not-run\n'); exe.chmod(0o755)
+            (Path(tmp) / 'resources.pak').write_text('')
+            with mock.patch.dict(os.environ, {'CROSSPET_CODEX_BIN': str(exe)}):
+                found = integrate.codex_programs()
+        self.assertFalse(any(str(exe) in f for f in found), found)
     def test_codex_programs_lists_override_with_version(self):
         fake = str(Path(__file__).resolve().parent / 'fake_codex.py')
         with mock.patch.dict(os.environ, {'CROSSPET_CODEX_BIN': fake}):
