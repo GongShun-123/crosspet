@@ -884,11 +884,14 @@ function quotaEvent(id, q) {
   quotaMemory(m => {
     const prev = m[id] || {}, now = Date.now() / 1000
     if (Array.isArray(q.windows)) {
+      // GPT 额度有两个来源（Codex 服务 / 本机记录，见 codex-quota.js）：来源变了不比——记录常常比服务旧，
+      // 从服务切到记录时看着像「额度突然恢复」，会误播 reset
+      const sameSource = (q.source || '') === (prev.source || '')
       for (const w of q.windows) {
         const p = (prev.windows || []).find(x => x.label === w.label)
-        if (p && p.reset && now < p.reset - 600 && p.used - w.used >= 15) ev = 'reset'
+        if (sameSource && p && p.reset && now < p.reset - 600 && p.used - w.used >= 15) ev = 'reset'
       }
-      m[id] = { ...prev, windows: q.windows }
+      m[id] = { ...prev, windows: q.windows, source: q.source || '' }
     }
     const bal = typeof q.balance === 'number' ? q.balance : parseFloat(((q.text || '').match(/[¥$]\s*([\d.]+)/) || [])[1])
     if (!isNaN(bal)) {
