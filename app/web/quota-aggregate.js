@@ -48,6 +48,9 @@
     return out + '…'
   }
 
+  const LOOSE_ROWS = 3   // 正常字号放得下的行数（见 render 里的说明）
+  const isCrowded = rowCount => rowCount > LOOSE_ROWS
+
   // 画成对齐的表：名字一列、每个窗口一列，列宽自动撑开，不要求等宽字体。
   // 格子比别的行少的行，最后一格占满剩下的列（余额、Gemini 的长文本不撑歪别的行）
   function render(el, list, nameWidth = NAME_WIDTH) {
@@ -71,14 +74,15 @@
         el.append(cell)
       })
     }
-    // 窗口放不下（Gemini 的模型池名字长）：字和间距收紧一点，别把名字列挤没
-    if (el.scrollWidth > el.clientWidth + 1) {
-      el.classList.add('tight')
-      // 收紧了还放不下（名字长 + 四家都有 + 微软雅黑比苹方宽）：名字再截短一点，重画一次
-      if (el.scrollWidth > el.clientWidth + 1 && nameWidth > NAME_WIDTH_TIGHT) render(el, list, NAME_WIDTH_TIGHT)
-    }
+    // 收紧（字号 9px、行高 1.1）的两个条件：
+    // 1. 行太多：底栏（#foot）留给额度小窗的高度预算只够 3 行正常字号，或 4 行收紧后的字号；
+    //    4 家都有时不管宽不宽都要收紧，不然人物会被顶上去
+    // 2. 窗口放不下（Gemini 的模型池名字长）：字和间距收紧一点，别把名字列挤没
+    if (isCrowded(list.length) || el.scrollWidth > el.clientWidth + 1) el.classList.add('tight')
+    // 收紧了还放不下（名字长 + 四家都有 + 微软雅黑比苹方宽）：名字再截短一点，重画一次
+    if (el.scrollWidth > el.clientWidth + 1 && nameWidth > NAME_WIDTH_TIGHT) render(el, list, NAME_WIDTH_TIGHT)
   }
 
-  root.QuotaAggregate = { rows, render, compact, shortName }
-  if (typeof module !== 'undefined') module.exports = { rows, compact, shortName }
+  root.QuotaAggregate = { rows, render, compact, shortName, isCrowded }
+  if (typeof module !== 'undefined') module.exports = { rows, compact, shortName, isCrowded }
 })(typeof window !== 'undefined' ? window : globalThis)

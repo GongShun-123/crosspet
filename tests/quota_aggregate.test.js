@@ -90,3 +90,9 @@ test('顺序不依赖传进来的清单顺序（macOS 上清单每次启动的�
   assert.deepStrictEqual(rows(quota, 'iris', shuffled, nameOf).map(r => r.id), ['claude', 'deepseek', 'gemini', 'gpt'])
   assert.deepStrictEqual(rows(quota, 'gpt', shuffled, nameOf).map(r => r.id), ['gpt', 'claude', 'deepseek', 'gemini'])
 })
+
+test('4 行以上不管宽不宽都要收紧（底栏高度预算：3 行正常字号 / 4 行收紧后）', () => {
+  const { isCrowded } = require('../app/web/quota-aggregate.js')
+  assert.deepStrictEqual([0, 1, 2, 3].map(isCrowded), [false, false, false, false])
+  assert.deepStrictEqual([4, 5, 6].map(isCrowded), [true, true, true])
+})
