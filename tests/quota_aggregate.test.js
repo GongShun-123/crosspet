@@ -83,3 +83,10 @@ test('5 小时窗口是满的（100%）：不标重置时间，重置时间落�
   assert.deepStrictEqual(text(r), ['5h 100%', '周 78% · 10/18'])
   assert.deepStrictEqual(r.cells.map(c => c.filter(p => p.low).length), [0, 0])   // 100% 和 78% 都不紧张
 })
+
+test('顺序不依赖传进来的清单顺序（macOS 上清单每次启动的顺序都不同）', () => {
+  const quota = Object.fromEntries(['claude', 'deepseek', 'gemini', 'gpt'].map(id => [id, { text: '余额 ¥1.00', low: false }]))
+  const shuffled = ['gpt', 'gemini', 'claude', 'deepseek']
+  assert.deepStrictEqual(rows(quota, 'iris', shuffled, nameOf).map(r => r.id), ['claude', 'deepseek', 'gemini', 'gpt'])
+  assert.deepStrictEqual(rows(quota, 'gpt', shuffled, nameOf).map(r => r.id), ['gpt', 'claude', 'deepseek', 'gemini'])
+})

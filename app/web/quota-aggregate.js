@@ -24,7 +24,8 @@
   // 没有额度（没接入、没打开开关、读不到）的 AI 直接跳过，不占行
   function rows(quota, own, all, nameOf) {
     const out = []
-    for (const id of [own, ...all.filter(i => i !== own)]) {
+    // 其余按 id 字母序：不能指望 all 自带顺序——macOS 上角色清单是 Swift 字典序列化出来的，每次启动的顺序都不一样
+    for (const id of [own, ...all.filter(i => i !== own).sort()]) {
       const q = quota[id]
       if (!q || !q.text) continue
       const cells = String(q.text).split(/\s*｜\s*/).filter(Boolean).map(seg => compact(seg, !!q.low))
