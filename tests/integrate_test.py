@@ -1,8 +1,10 @@
 import contextlib
+import os
 import importlib.util
 import io
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('integrate', Path(__file__).resolve().parents[1] / 'tools/integrate.py')
@@ -10,6 +12,12 @@ integrate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(integrate)
 
 class IntegrationTests(unittest.TestCase):
+    def test_codex_programs_lists_override_with_version(self):
+        fake = str(Path(__file__).resolve().parent / 'fake_codex.py')
+        with mock.patch.dict(os.environ, {'CROSSPET_CODEX_BIN': fake}):
+            found = integrate.codex_programs()
+        self.assertTrue(found and found[0].startswith(fake), found)
+        self.assertIn('codex-cli 0.0.0-fake', found[0])
     def test_preserve_other_hook_in_same_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / 'settings.json'

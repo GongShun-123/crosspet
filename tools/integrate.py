@@ -924,6 +924,46 @@ def wsl_codex_homes() -> list:
     return found_ or [f"装了 WSL（{', '.join(distros)}），里面没找到 .codex"] if distros else []
 
 
+def codex_programs() -> list:
+    """GPT 额度要问 Codex 本地服务：列出能找到的 codex 程序和版本（和桌宠找的顺序一致）"""
+    import shutil
+    import subprocess
+    cands = []
+    if os.environ.get("CROSSPET_CODEX_BIN"):
+        cands.append(os.environ["CROSSPET_CODEX_BIN"])
+    if os.name == "nt":
+        for name in ("codex.exe", "codex.cmd"):
+            p = shutil.which(name)
+            if p:
+                cands.append(p)
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            cands.append(os.path.join(appdata, "npm", "codex.cmd"))
+        try:   # Codex 桌面版开着时，它的 codex.exe 在跑：拿到真实路径（装在受保护目录里也能拿到）
+            out = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-Process codex -ErrorAction SilentlyContinue).Path"],
+                                 capture_output=True, text=True, timeout=8).stdout
+            cands += [l.strip() for l in out.splitlines() if l.strip()]
+        except Exception:
+            pass
+    else:
+        cands.append("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex")
+        p = shutil.which("codex")
+        if p:
+            cands.append(p)
+        cands += ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
+    seen_, out_ = set(), []
+    for c in cands:
+        if c in seen_ or not os.path.isfile(c):
+            continue
+        seen_.add(c)
+        try:
+            v = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=8).stdout.strip() or "版本未知"
+        except Exception as e:
+            v = f"运行失败：{e.__class__.__name__}"
+        out_.append(f"{c}（{v}）")
+    return out_
+
+
 def codex_warnings() -> list:
     """接入 Codex 时的提醒：配置可能不在 CrossPet 写的地方"""
     warn = []
@@ -961,6 +1001,8 @@ def diagnose() -> str:
     # Codex
     L.append(f"[Codex] hooks.json：{file_state(CODEX_HOOKS, lambda: has_hooks(CODEX_HOOKS))}；目录里其他文件 {'有' if found(CODEX_HOOKS.parent, '', ('hooks.json',), quiet=True) else '没有（Codex 可能没在这里运行过）'}")
     L.append(f"  config.toml {'在' if (CODEX_HOOKS.parent / 'config.toml').exists() else '不在'}；环境变量 {env_line('CODEX_HOME')}；终端配置里设了 CODEX_HOME：{'、'.join(shell_profile_mentions('CODEX_HOME')) or '无'}")
+    progs = codex_programs()
+    L.append("  codex 程序（GPT 额度向它查）：" + ("；".join(short(Path(p.split("（")[0])) + "（" + p.split("（", 1)[1] for p in progs) if progs else "没找到——额度只能读本机会话记录"))
     w = wsl_codex_homes()
     if w:
         L.append(f"  WSL：{'；'.join(w)}")
