@@ -431,7 +431,7 @@ namespace CrossPet
         DateTime codexLiveAt = DateTime.MinValue;       // 上次问服务的时间（不管成没成）
         DateTime codexRecordsAt = DateTime.MinValue;    // 上次读记录的时间：服务不通时也最多每分钟读一次
         bool codexLiveOK, codexInFlight, sessionLocked;
-        string lastGptQuota = "还没读过";
+        string lastGptQuota = "还没读过", lastGptLogKey;
 
         /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次服务，
         /// 服务不通时每分钟读一次记录。藏着、锁屏时定时的不查
@@ -467,6 +467,9 @@ namespace CrossPet
             if (!Store.Flag("gptQuota")) return;   // 查的途中关掉了额度显示
             var tag = source == "live" ? $"Codex 服务，{ms / 1000.0:0.0} 秒" : source == "records" ? "本机记录" + CodexQuota.WslNote : "没读到";
             lastGptQuota = $"{DateTime.Now:HH:mm:ss} （{tag}{(error != null ? "；服务：" + error : "")}）" + (rl != null ? CodexQuota.Brief(rl) : "");
+            // 来源或出错原因变了才记日志（每 5 分钟查一次，照记会刷屏）：反馈附带的日志里能看出额度从哪来、为什么没问到
+            var logKey = source + "|" + error;
+            if (logKey != lastGptLogKey) { lastGptLogKey = logKey; Store.Log("GPT 额度：" + lastGptQuota.Substring(9)); }
             if (source == "none") return;
             Js($"setCodexQuota({Store.Json.Serialize(CodexQuota.Payload(source, rl, error, ms))})");
         }
