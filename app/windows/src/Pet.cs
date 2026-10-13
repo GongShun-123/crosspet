@@ -49,7 +49,8 @@ namespace CrossPet
         const double BaseWidth = 260, BaseHeight = 362;
         // 文字大小：网页按「人物大小、文字大小」算出的画布（网页 CSS 尺寸），窗口 = 画布 × 人物大小（app/web/text-size.js）
         double pageW = BaseWidth, pageH = BaseHeight;
-        double pageFoot = 62, shownFoot = 62;   // 画布底栏高 / 窗口现在按的底栏高：改文字大小时按差值挪窗口，人物不动
+        double pageFoot = 62;      // 画布底栏高（网页像素）
+        double shownFootPx;        // 窗口现在的底栏在屏幕上多高（物理像素）；0 = 还没按画布设过
 
         public Pet(CoreWebView2Environment env) { this.env = env; }
 
@@ -173,7 +174,7 @@ namespace CrossPet
                         if (last != null && Newer(Store.Version, last)) Js($"justUpdated({Q("v" + Store.Version)})");
                     }
                     ready = true;
-                    ApplySizes();   // 解锁过文字大小的：按画布重设窗口（锁着的尺寸不变）
+                    ApplySizes(anchor: Anchor.Corner);   // 解锁过文字大小的：按画布重设窗口，左上角不动（锁着的尺寸不变）
                     stamps.Clear();
                     Poll();
                     RefreshQuota();

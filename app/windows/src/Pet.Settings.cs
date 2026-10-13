@@ -32,9 +32,23 @@ namespace CrossPet
         static bool TextLinked => !(Store.Settings.TryGetValue("textLinked", out var v) && v is bool b && !b);
         static string Num(double d) => d.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        /// <summary>改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放。
-        /// 改人物大小时底边中点不动（脚下的位置不变）；改文字大小时底栏变高 / 变矮多少，窗口底边就往下 / 往上挪多少，人物不动</summary>
-        void ApplyScale(double scale)
+        /// <summary>换大小时窗口锚在哪（和 macOS 的 App.Anchor 一致，那边有测试 tests/window_place_probe.sh）：
+        /// Corner = 启动 / 网页重载，存下的位置本来就是这个画布的窗口，左上角不动只换大小（不然解锁的人每次启动都往旁边漂）；
+        /// Bottom = 改人物大小，底边中点不动，和以前一样（屏幕上的底栏高 = 62 × 文字大小，没变）；
+        /// Feet = 改文字大小，底栏在屏幕上变高 / 变矮多少，窗口底边就往下 / 往上挪多少，人物不动</summary>
+        enum Anchor { Corner, Bottom, Feet }
+
+        /// <summary>纯计算，物理像素、y 向下。oldFoot / newFoot：底栏在屏幕上的高</summary>
+        static (int, int) PlaceWindow(Native.RECT old, int w, int h, double oldFoot, double newFoot, Anchor anchor)
+        {
+            if (anchor == Anchor.Corner) return (old.Left, old.Top);
+            int x = (old.Left + old.Right) / 2 - w / 2;
+            if (anchor == Anchor.Feet) return (x, old.Bottom + (int)Math.Round(newFoot - oldFoot) - h);
+            return (x, old.Bottom - h);
+        }
+
+        /// <summary>改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放；放在哪见 Anchor</summary>
+        void ApplyScale(double scale, Anchor anchor = Anchor.Bottom)
         {
             Native.GetWindowRect(hwnd, out var old);
             Window.Width = pageW * scale; Window.Height = pageH * scale;
@@ -42,16 +56,17 @@ namespace CrossPet
             if (web != null) web.ZoomFactor = scale;
             Native.GetWindowRect(hwnd, out var now);
             int w = now.Right - now.Left, h = now.Bottom - now.Top;
-            int down = (int)Math.Round((pageFoot - shownFoot) * w / pageW);   // 网页像素 → 物理像素（含系统缩放）
-            shownFoot = pageFoot;
-            var (x, y) = Clamp((old.Left + old.Right) / 2 - w / 2, old.Bottom + down - h, w, h);
+            double footPx = pageFoot * w / pageW;   // 网页像素 → 物理像素（含系统缩放）
+            var (x, y) = PlaceWindow(old, w, h, shownFootPx > 0 ? shownFootPx : footPx, footPx, anchor);
+            shownFootPx = footPx;
+            if (dock == null) (x, y) = Clamp(x, y, w, h);   // 贴着边时不夹：窗口本来就有一截在屏幕外，之后 ApplyDock 会重新对齐
             Native.MoveTo(hwnd, x, y);
             SavePosition();
         }
 
         /// <summary>人物大小 / 文字大小变了：交给网页算画布（规则在 app/web/text-size.js），按回来的尺寸设窗口。
-        /// target：人物大小要动画到哪；null = 只是文字变了，按现在的人物大小重设一次</summary>
-        async void ApplySizes(double? target = null)
+        /// target：人物大小要动画到哪（底边不动）；null = 文字变了（Feet）或网页刚加载完（Corner），按现在的人物大小重设一次</summary>
+        async void ApplySizes(double? target = null, Anchor anchor = Anchor.Feet)
         {
             if (ready && web?.CoreWebView2 != null)   // 网页还没加载完：先按旧画布，加载完（NavigationCompleted）会再调一次
             {
@@ -67,7 +82,9 @@ namespace CrossPet
                 }
                 catch (Exception e) { Store.Log("文字大小：算画布失败 " + e.Message); }
             }
-            if (target is double t) AnimateScale(t); else ApplyScale(shownScale > 0 ? shownScale : Scale);
+            if (target is double t) { AnimateScale(t); return; }
+            ApplyScale(shownScale > 0 ? shownScale : Scale, anchor);
+            if (anchor == Anchor.Feet && dock != null) ApplyDock();   // 贴着边时改了文字：窗口变宽了，重新对齐屏幕边
         }
 
         /// <summary>拖滑块时每次只变一点，直接跟手；一下子变很多（点「还原」）时用 0.2 秒过渡过去</summary>

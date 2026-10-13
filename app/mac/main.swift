@@ -24,6 +24,16 @@ if CommandLine.arguments.contains("--codex-quota-probe") {
     print(String(decoding: d, as: UTF8.self)); exit(0)
 }
 
+// 测试用：算一次「换大小时窗口放在哪」，打印 x y 宽 高 就退出（tests/window_place_probe.sh）
+if let i = CommandLine.arguments.firstIndex(of: "--window-place-probe") {
+    let a = Array(CommandLine.arguments.dropFirst(i + 1))
+    let n = a.dropFirst().compactMap { Double($0) }.map { CGFloat($0) }
+    guard let anchor = App.Anchor(rawValue: a.first ?? ""), n.count == 9 else { print("参数不对"); exit(1) }
+    let r = App.placeWindow(old: NSRect(x: n[0], y: n[1], width: n[2], height: n[3]), size: NSSize(width: n[4], height: n[5]),
+                            oldFoot: n[6], newFoot: n[7], anchor: anchor, visibleMinY: n[8])
+    print([r.minX, r.minY, r.width, r.height].map { String(format: "%g", Double($0)) }.joined(separator: " ")); exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = App()
 app.delegate = delegate

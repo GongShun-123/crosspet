@@ -87,7 +87,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     // 文字大小：网页按「人物大小、文字大小」算出的画布（网页 CSS 尺寸），窗口 = 画布 × 人物大小（app/web/text-size.js）
     var pageSize = NSSize(width: 260, height: 362)
     var pageFoot: CGFloat = 62    // 画布底栏高（名牌 + 额度），改文字大小时按它的变化挪窗口，人物不动
-    var shownFoot: CGFloat = 62   // 窗口现在按的底栏高
+    var shownFootPt: CGFloat = 0  // 窗口现在的底栏在屏幕上多高（点）；0 = 还没按画布设过
 
     // 接入 AI 用的
     var integrated: [String]?

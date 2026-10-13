@@ -21,27 +21,47 @@ extension App {
     var followApps: Bool { defaults.object(forKey: "followApps") as? Bool ?? true }
     var eggsEnabled: Bool { defaults.object(forKey: "eggs") as? Bool ?? true }
 
-    /// 改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放。
-    /// 改人物大小时底边中点不动（脚下的位置不变）；改文字大小时底栏变高 / 变矮多少，窗口底边就往下 / 往上挪多少，人物不动
-    func applyScale(_ scale: CGFloat) {
-        let old = panel.frame
+    /// 换大小时窗口锚在哪：
+    /// - corner：启动 / 网页重载。存下的位置本来就是这个画布的窗口，左下角不动只换大小（不然解锁的人每次启动都往旁边漂）
+    /// - bottom：改人物大小。底边中点不动（脚下的位置不变），和以前一样；屏幕上的底栏高 = 62 × 文字大小，没变
+    /// - feet：改文字大小。底栏在屏幕上变高 / 变矮多少，窗口底边就往下 / 往上挪多少，人物不动
+    enum Anchor: String { case corner, bottom, feet }
+
+    /// 纯计算（tests/window_place_probe.sh 测），屏幕点、y 向上。oldFoot / newFoot：底栏在屏幕上的高
+    static func placeWindow(old: NSRect, size: NSSize, oldFoot: CGFloat, newFoot: CGFloat, anchor: Anchor, visibleMinY: CGFloat?) -> NSRect {
+        switch anchor {
+        case .corner:
+            return NSRect(origin: old.origin, size: size)
+        case .bottom:
+            return NSRect(x: old.midX - size.width / 2, y: old.minY, width: size.width, height: size.height)
+        case .feet:
+            var y = old.minY - (newFoot - oldFoot)
+            // 往下扩出了可见区：挪回来，但不挪到比原来还高（用户本来就放在边上的不动）
+            if let v = visibleMinY, y < v, y < old.minY { y = min(old.minY, v) }
+            return NSRect(x: old.midX - size.width / 2, y: y, width: size.width, height: size.height)
+        }
+    }
+
+    /// 改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放；放在哪见 Anchor
+    func applyScale(_ scale: CGFloat, anchor: Anchor = .bottom) {
         let size = NSSize(width: pageSize.width * scale, height: pageSize.height * scale)
-        var y = old.minY - (pageFoot - shownFoot) * scale
-        // 往下扩出了屏幕：挪回来，但不挪到比原来还高（用户本来就放在边上的不动）
-        if let vf = (panel.screen ?? NSScreen.main)?.visibleFrame, y < vf.minY, y < old.minY { y = min(old.minY, vf.minY) }
-        let origin = NSPoint(x: old.midX - size.width / 2, y: y)
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        let f = Self.placeWindow(old: panel.frame, size: size, oldFoot: shownFootPt, newFoot: pageFoot * scale, anchor: anchor,
+                                 visibleMinY: (panel.screen ?? NSScreen.main)?.visibleFrame.minY)
+        panel.setFrame(f, display: true)
         web.pageZoom = scale
-        shownFoot = pageFoot
-        defaults.set([origin.x, origin.y], forKey: "origin")
+        shownFootPt = pageFoot * scale
+        defaults.set([f.minX, f.minY], forKey: "origin")
     }
 
     /// 人物大小 / 文字大小变了：交给网页算画布（规则在 app/web/text-size.js），按回来的尺寸设窗口。
-    /// target：人物大小要动画到哪；nil = 只是文字变了，按现在的人物大小重设一次
-    func applySizes(animateTo target: CGFloat? = nil) {
+    /// target：人物大小要动画到哪（底边不动）；nil = 文字变了（anchor .feet）或网页刚加载完（.corner），按现在的人物大小重设一次
+    func applySizes(animateTo target: CGFloat? = nil, anchor: Anchor = .feet) {
+        if shownFootPt == 0 { shownFootPt = pageFoot * panel.frame.width / pageSize.width }   // 还没按画布设过：按现在的窗口算
         let finish = { [weak self] in
             guard let self else { return }
-            if let t = target { self.animateScale(to: t) } else { self.applyScale(self.shownScale > 0 ? self.shownScale : self.petScale) }
+            if let t = target { self.animateScale(to: t); return }
+            self.applyScale(self.shownScale > 0 ? self.shownScale : self.petScale, anchor: anchor)
+            if anchor == .feet, self.dock != nil { self.applyDock() }   // 贴着边时改了文字：窗口变宽了，重新对齐屏幕边
         }
         guard ready else { finish(); return }   // 网页还没加载完：先按旧画布，加载完（didFinish）会再调一次
         web.evaluateJavaScript("setSizes(\(Double(target ?? petScale)), \(textScale), \(textLinked))") { [weak self] r, _ in
