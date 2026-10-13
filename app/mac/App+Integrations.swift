@@ -132,10 +132,10 @@ extension App {
 
     func pushSettings() {
         guard settingsWeb != nil else { return }
-        // 当前角色以桌宠页面里正在演的为准（启动时由页面自己恢复上次的角色）
+        // 当前角色以桌宠页面里正在演的为准（启动时外壳会先从 UserDefaults 恢复上次的角色，见 didFinish）
         web.evaluateJavaScript("charId") { [weak self] r, _ in
             guard let self, let v = self.settingsWeb else { return }
-            // 只在还不知道当前角色时（刚启动、页面自己恢复了上次的角色）问页面；换角色有 0.33 秒过渡，过渡中页面里还是旧角色
+            // 只在还不知道当前角色时（刚启动、没存过上次的角色）问页面；换角色有 0.33 秒过渡，过渡中页面里还是旧角色
             if self.currentId == nil, let id = r as? String, self.characterIds.contains(id) { self.currentId = id }
             guard let data = try? JSONSerialization.data(withJSONObject: self.settingsState()),
                   let text = String(data: data, encoding: .utf8) else { return }
