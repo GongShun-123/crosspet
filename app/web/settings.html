@@ -16,7 +16,14 @@ h1 { font-size: 15px; margin: 0 0 2px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
 .card h2 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0; padding: 8px 14px 4px; letter-spacing: .04em; }
 .item { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--line); min-height: 42px; }
-.card h2 + .item { border-top: none; }
+.card h2 + .item, .card > .item:first-child { border-top: none; }
+/* 标签页：一次只看一组设置，最上面的「有新版本」不跟着切 */
+.tabs { display: flex; gap: 2px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 6px 12px 7px; margin-bottom: -1px; }
+.tabs button:hover { color: var(--ink); }
+.tabs button:focus:not(:focus-visible) { outline: none; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.card[data-tab]:not(.on) { display: none; }
 .item .label { flex: 1; min-width: 0; }
 .item .label small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 .item .ctl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -56,38 +63,33 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
     <div class="ctl"><button class="primary" data-action="update">更新</button></div></div>
 </div>
 
-<div class="card">
-  <h2>外观</h2>
+<nav class="tabs" id="tabs">
+  <button data-tab="look">外观</button><button data-tab="character">角色</button><button data-tab="quota">额度</button><button data-tab="ai">接入 AI</button><button data-tab="general">通用</button>
+</nav>
+
+<div class="card" data-tab="look">
   <div class="item"><div class="label">大小</div>
     <div class="ctl"><input type="range" id="size" min="0.6" max="1.6" step="0.01"><span class="val" id="sizeVal"></span><button data-reset-size>还原</button></div></div>
   <div class="item"><div class="label">显示名字<small>名牌下面的额度不受影响</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="showName"><span></span></label></div></div>
-  <div class="item"><div class="label">全屏时隐藏<small>看视频、演示、玩游戏等全屏时不出现</small></div>
-    <div class="ctl"><label class="switch"><input type="checkbox" data-key="hideFullscreen"><span></span></label></div></div>
   <div class="item"><div class="label">背景光晕<small>深色背景上会变成一圈亮光，「自动」时深色模式下不显示</small></div>
     <div class="ctl"><div class="seg" id="aura"><button data-v="auto">自动</button><button data-v="on">始终显示</button><button data-v="off">关闭</button></div></div></div>
 </div>
 
-<div class="card">
-  <h2>角色</h2>
+<div class="card" data-tab="character">
   <div class="item"><div class="label">当前角色</div>
     <div class="ctl"><select id="character"></select></div></div>
   <div class="item"><div class="label">名字<small>留空恢复默认</small></div>
     <div class="ctl"><input type="text" id="name" maxlength="40"><button id="saveName">保存</button></div></div>
   <div class="item"><div class="label">跟随前台 AI 应用<small>切到哪个 AI 的 App，就换成哪个角色</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="followApps"><span></span></label></div></div>
-  <div class="item hidden" data-only="hotkeys"><div class="label">隐藏 / 显示的快捷键<small id="hotkeyNote">按一下藏起来，再按一下出来；也可以点菜单栏的爪印（Windows 双击托盘图标）叫她出来</small></div>
-    <div class="ctl"><select id="hideHotkey" aria-label="隐藏快捷键"></select></div></div>
-  <div class="item"><div class="label">省电模式<small>身边的小特效刷新慢一点、闲着时更快停下；人物动作照旧。笔记本用电池时可以打开</small></div>
-    <div class="ctl"><label class="switch"><input type="checkbox" data-key="powerSave"><span></span></label></div></div>
-  <div class="item"><div class="label">随机彩蛋<small>偶尔有别的角色冒出来捣乱；关掉后右键「召唤彩蛋」还能手动看</small></div>
-    <div class="ctl"><label class="switch"><input type="checkbox" data-key="eggs"><span></span></label></div></div>
   <div class="item" data-only="followEvents"><div class="label">跟随 AI 工作事件<small>在终端里用 AI 时，按最近在干活的 AI 换角色</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="followEvents"><span></span></label></div></div>
+  <div class="item"><div class="label">随机彩蛋<small>偶尔有别的角色冒出来捣乱；关掉后右键「召唤彩蛋」还能手动看</small></div>
+    <div class="ctl"><label class="switch"><input type="checkbox" data-key="eggs"><span></span></label></div></div>
 </div>
 
-<div class="card">
-  <h2>额度</h2>
+<div class="card" data-tab="quota">
   <div class="item"><div class="label"><span id="gptLabel">显示 GPT 额度<small id="gptNote">让电脑上的 Codex 自己查用量（不对话、不耗额度，不碰登录凭据）</small></span></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="gptQuota"><span></span></label></div></div>
   <div class="item"><div class="label">显示 Gemini 额度<small>询问本机正在运行的 Antigravity</small></div>
@@ -98,19 +100,23 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="quotaAggregate"><span></span></label></div></div>
 </div>
 
-<div class="card hidden" id="integrateCard">
-  <h2>接入 AI</h2>
+<div class="card" data-tab="ai" id="integrateCard">
+  <div class="item"><div class="label">AI 开始工作时自动出现<small>接入的 AI 开始干活时，桌宠没开着就自己打开；从菜单退出后，要等重新打开 AI 或重启电脑才会再自己出现</small></div>
+    <div class="ctl"><label class="switch"><input type="checkbox" data-key="aiAutostart"><span></span></label></div></div>
   <div id="integrations"></div>
 </div>
 
-<div class="card">
-  <h2>其他</h2>
+<div class="card" data-tab="general">
   <div class="item"><div class="label" id="loginLabel">登录时自动启动</div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="login"><span></span></label></div></div>
+  <div class="item"><div class="label">全屏时隐藏<small>看视频、演示、玩游戏等全屏时不出现</small></div>
+    <div class="ctl"><label class="switch"><input type="checkbox" data-key="hideFullscreen"><span></span></label></div></div>
   <div class="item"><div class="label">拖到屏幕边缘时贴边<small>拖到屏幕左右边缘松手，她就缩到边上只露半个身子；AI 干活时自己跑出来，干完缩回去</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="edgeDock"><span></span></label></div></div>
-  <div class="item"><div class="label">AI 开始工作时自动出现<small>接入的 AI 开始干活时，桌宠没开着就自己打开；从菜单退出后，要等重新打开 AI 或重启电脑才会再自己出现</small></div>
-    <div class="ctl"><label class="switch"><input type="checkbox" data-key="aiAutostart"><span></span></label></div></div>
+  <div class="item hidden" data-only="hotkeys"><div class="label">隐藏 / 显示的快捷键<small id="hotkeyNote">按一下藏起来，再按一下出来；也可以点菜单栏的爪印（Windows 双击托盘图标）叫她出来</small></div>
+    <div class="ctl"><select id="hideHotkey" aria-label="隐藏快捷键"></select></div></div>
+  <div class="item"><div class="label">省电模式<small>身边的小特效刷新慢一点、闲着时更快停下；人物动作照旧。笔记本用电池时可以打开</small></div>
+    <div class="ctl"><label class="switch"><input type="checkbox" data-key="powerSave"><span></span></label></div></div>
   <div class="item"><div class="label">检查更新</div>
     <div class="ctl"><button data-action="checkUpdate">检查</button></div></div>
   <div class="item"><div class="label">文件夹<small>换立绘、加角色看「自定义角色」文档</small></div>
@@ -181,7 +187,6 @@ const NEVER_SEEN = {
 const agoText = s => s < 60 ? '刚刚' : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : s < 86400 ? `${Math.floor(s / 3600)} 小时前` : `${Math.floor(s / 86400)} 天前`
 
 function renderIntegrations(list) {
-  $('integrateCard').classList.toggle('hidden', !list)
   if (!list) return
   $('integrations').replaceChildren(...list.map(i => {
     const row = document.createElement('div'); row.className = 'item'
@@ -218,6 +223,17 @@ $('character').onchange = () => {
 const saveName = () => { post({ cmd: 'rename', id: state.character, name: $('name').value.trim() }); $('name').blur(); toast('名字已保存') }
 $('saveName').onclick = saveName
 $('name').onkeydown = e => { if (e.key === 'Enter') saveName() }
+
+// 标签页：记住上次看的是哪一页（每个人自己的小习惯，存不下也没关系）
+function showTab(tab) {
+  if (!document.querySelector(`.card[data-tab="${tab}"]`)) tab = 'look'
+  for (const el of document.querySelectorAll('[data-tab]')) el.classList.toggle('on', el.dataset.tab === tab)
+  try { localStorage.setItem('crosspet-settings-tab', tab) } catch {}
+}
+for (const b of $('tabs').children) b.onclick = () => showTab(b.dataset.tab)
+let lastTab = null
+try { lastTab = localStorage.getItem('crosspet-settings-tab') } catch {}
+showTab(lastTab || 'look')
 
 post({ cmd: 'get' })
 </script>
