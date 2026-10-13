@@ -21,8 +21,12 @@ namespace CrossPet
         public static string Python => Path.Combine(Install, "python", "python.exe");
         public static string Version => ReadText(Path.Combine(Install, "VERSION"))?.Trim() ?? "0";
 
-        // 网页从两个虚拟域名读文件：程序自带的网页（安装目录）和角色立绘（数据目录，用户可以改）
+        // 网页和角色立绘都从同一个虚拟域名读：https://crosspet.app/ → 数据目录（网页每次启动从安装目录同步到 数据目录\web）。
+        // 1.3.3 及以前立绘走第二个域名 crosspet.data，有的用户那里（代理 / 加速器之类的网络环境、新版 WebView2 拦「公网页面读内网地址」）
+        // 跨域名的请求整个被拦，立绘全都不显示（1.3.4 修）。同步失败时退回旧的两个域名，至少大多数人能用
         public const string AppHost = "crosspet.app", DataHost = "crosspet.data";
+        public static bool SameOrigin;   // 网页同步到数据目录成功了：一个域名
+        public static string PageUrl(string page) => SameOrigin ? $"https://{AppHost}/web/{page}" : $"https://{AppHost}/{page}";
 
         public static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
@@ -86,6 +90,11 @@ namespace CrossPet
                 catch (Exception e) { Log("同步角色失败 " + dir + ": " + e.Message); }
             }
             foreach (var md in Directory.GetFiles(src, "*.md")) File.Copy(md, Path.Combine(Characters, Path.GetFileName(md)), true);
+            // 网页也同步一份到数据目录，和立绘放在同一个虚拟域名下
+            var web = Path.Combine(Data, "web");
+            try { if (Directory.Exists(web)) Directory.Delete(web, true); CopyDir(Path.Combine(Install, "web"), web); }
+            catch (Exception e) { Log("同步网页失败，退回两个域名: " + e.Message); }
+            SameOrigin = File.Exists(Path.Combine(web, "index.html"));
             var hook = Path.Combine(Install, "integrations", "crosspet-hook.py");
             if (File.Exists(hook)) File.Copy(hook, Path.Combine(Data, "crosspet-hook.py"), true);
             if (!File.Exists(AppMap)) File.Copy(Path.Combine(Install, "apps.json"), AppMap);
@@ -127,7 +136,7 @@ namespace CrossPet
                                                       .OrderBy(f => Path.GetFileName(f), StringComparer.Ordinal))
             {
                 var stem = Path.GetFileNameWithoutExtension(f);
-                var url = $"https://{DataHost}/characters/{Uri.EscapeDataString(id)}/{Uri.EscapeDataString(Path.GetFileName(f))}";
+                var url = $"https://{(SameOrigin ? AppHost : DataHost)}/characters/{Uri.EscapeDataString(id)}/{Uri.EscapeDataString(Path.GetFileName(f))}";
                 if (stem == "idle-blink") { blink = url; continue; }
                 if (stem == "idle") blinkBase = url;
                 var pose = stem.Split('-')[0];

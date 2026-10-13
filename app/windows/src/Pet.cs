@@ -140,6 +140,7 @@ namespace CrossPet
             timer.Start();
         }
 
+        int imageErrors;
         async Task InitWeb()
         {
             try
@@ -176,7 +177,18 @@ namespace CrossPet
                     RefreshCodexQuota(CodexWhy.Now);
                     FollowForeground();
                 };
-                core.Navigate($"https://{Store.AppHost}/index.html");
+                // 立绘加载失败时网页发消息过来：记进日志（每次启动最多 5 条），反馈里能看出是哪张图、为什么
+                core.WebMessageReceived += (_, a) =>
+                {
+                    try
+                    {
+                        if (imageErrors >= 5 || !(Store.Json.DeserializeObject(a.WebMessageAsJson) is Dictionary<string, object> m) || !m.TryGetValue("imageError", out var src)) return;
+                        imageErrors++;
+                        Store.Log($"立绘加载失败: {src}（{(Store.SameOrigin ? "同一个域名" : "两个域名")}）");
+                    }
+                    catch { }
+                };
+                core.Navigate(Store.PageUrl("index.html"));
             }
             catch (Exception e)
             {
@@ -215,11 +227,16 @@ namespace CrossPet
             catch (Exception e) { Store.Log("WebView2 恢复失败: " + e); }
         }
 
-        /// <summary>两个虚拟域名：程序自带的网页（安装目录）、角色立绘和数据（数据目录）。只在这两个域名里加载，外部网页一律不开</summary>
+        /// <summary>虚拟域名 https://crosspet.app/ → 数据目录（网页在 web\、立绘在 characters\，同一个域名，见 Store.SameOrigin）。
+        /// 只在这个域名里加载，外部网页一律不开</summary>
         public static void Map(CoreWebView2 core)
         {
-            core.SetVirtualHostNameToFolderMapping(Store.AppHost, Path.Combine(Store.Install, "web"), CoreWebView2HostResourceAccessKind.Allow);
-            core.SetVirtualHostNameToFolderMapping(Store.DataHost, Store.Data, CoreWebView2HostResourceAccessKind.Allow);
+            if (Store.SameOrigin) core.SetVirtualHostNameToFolderMapping(Store.AppHost, Store.Data, CoreWebView2HostResourceAccessKind.Allow);
+            else
+            {
+                core.SetVirtualHostNameToFolderMapping(Store.AppHost, Path.Combine(Store.Install, "web"), CoreWebView2HostResourceAccessKind.Allow);
+                core.SetVirtualHostNameToFolderMapping(Store.DataHost, Store.Data, CoreWebView2HostResourceAccessKind.Allow);
+            }
             core.NavigationStarting += (_, a) => { if (!a.Uri.StartsWith($"https://{Store.AppHost}/")) a.Cancel = true; };
             core.NewWindowRequested += (_, a) => a.Handled = true;
         }

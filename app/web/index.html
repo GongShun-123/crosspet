@@ -141,6 +141,10 @@ html.no-name #caption { display: none; }
   </div>
   <div id="foot"><div id="caption"></div><div id="quota"></div></div>
 </div>
+<script>
+// 立绘加载失败：告诉 Windows 外壳记进日志（反馈里能看出是哪张图）。macOS 上没有这个通道，不做任何事
+addEventListener('error', e => { if (e.target && e.target.tagName === 'IMG' && e.target.src) window.chrome?.webview?.postMessage({ imageError: e.target.src }) }, true)
+</script>
 <script src="effects.js"></script>
 <script src="codex-quota.js"></script>
 <script>
