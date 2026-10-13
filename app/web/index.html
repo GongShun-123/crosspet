@@ -164,6 +164,7 @@ addEventListener('error', e => { if (e.target && e.target.tagName === 'IMG' && e
 <script src="text-size.js"></script>
 <script src="codex-quota.js"></script>
 <script src="quota-aggregate.js"></script>
+<script src="stand-in.js"></script>
 <script>
 // CrossPet 画面：由 CrossPet.app（Swift 外壳）调用这几个函数
 //   init(manifest)          角色清单（characters/*/character.json + 立绘）
@@ -218,6 +219,9 @@ let lastActive = Date.now()
 const charState = {}, quota = {}, seenTool = {}, lastTrouble = {}
 
 const char = () => manifest.characters[charId]
+// 当前角色是不是也在响应 id 这个 AI 的事件（character.json 的 reactTo；代码里叫“代演 standIn”，见 stand-in.js）：
+// 是的话它的状态 / 多会话 / 庆祝也由她来演
+const standsIn = id => StandIn.covers(manifest?.characters?.[charId]?.reactTo, charId, id)
 const linesOf = p => (char()?.lines && char().lines[p]) || LOCAL_LINES[p]
 function framesFor(p) {
   const c = char(); if (!c) return []
@@ -355,8 +359,12 @@ function renderQuota() {
   const el = $('quota')
   el.style.gridTemplateColumns = ''
   if (egg) { el.replaceChildren(); el.className = ''; return }
-  if (quotaAggregate) {
-    const ids = Object.keys(manifest?.characters || {}).filter(id => !manifest.characters[id].egg)
+  // 写了 reactTo（代演）的角色，即使没开「合并显示各家额度」，小窗也列出她响应的那几家
+  // （不然她自己没有额度，小窗一直是空的）
+  const reactTo = manifest?.characters?.[charId]?.reactTo
+  if (quotaAggregate || reactTo) {
+    let ids = Object.keys(manifest?.characters || {}).filter(id => !manifest.characters[id].egg)
+    if (!quotaAggregate) ids = StandIn.quotaIds(reactTo, charId, ids)
     QuotaAggregate.render(el, QuotaAggregate.rows(quota, charId, ids, id => manifest?.characters?.[id]?.name || id))
     return
   }
@@ -741,8 +749,14 @@ function sessionKind(e, now) {
   if (e.pose === 'idle' || e.pose === 'sleeping') return null
   return age < STUCK_AFTER / 1000 ? 'work' : null   // 一轮中途某个工具出错：还在干活，只是卡片变红
 }
+// 当前角色要演的会话：她自己的，加上她响应的各家 AI 的（会话 id 各家不重复，直接合在一起）
+function currentSessions() {
+  const out = { ...(sessions[charId] || {}) }
+  for (const [host, map] of Object.entries(sessions)) if (standsIn(host)) Object.assign(out, map)
+  return out
+}
 function refreshMulti() {
-  const map = sessions[charId] || {}, now = Date.now() / 1000
+  const map = currentSessions(), now = Date.now() / 1000
   const live = Object.entries(map).map(([sid, e]) => [sid, e, sessionKind(e, now)]).filter(x => x[2])
   const busy = live.filter(x => x[2] === 'work' || x[2] === 'ask').length
   if (!multi && (busy < 2 || egg || farewellLine !== null || updatingNow)) return
@@ -853,15 +867,18 @@ function endMulti() {
   multi = null
   shownAt = 0
   // 回到只剩的那一个对话的样子（没有就是待机）
-  const left = Object.values(sessions[charId] || {}).filter(e => sessionKind(e, Date.now() / 1000) === 'work' || sessionKind(e, Date.now() / 1000) === 'ask')
+  const left = Object.values(currentSessions()).filter(e => sessionKind(e, Date.now() / 1000) === 'work' || sessionKind(e, Date.now() / 1000) === 'ask')
   show(left.length ? left[0].pose : 'idle', true)
   watchStuck()
 }
 
 function applyCharState(id, s) {
   if (id === 'current') id = charId   // 多模型宿主里没有对应角色的模型（WorkBuddy 的混元、Kimi……）：由当前角色来演
+  const own = id                      // 事件原本属于哪家 AI：先按它记下状态，切回那家的角色时看到的才是最新的
+  charState[own] = s
+  if (standsIn(id)) id = charId       // 代演（reactTo）：别家 AI 的状态当成她自己的（多个会话同时干活时，由 refreshMulti 合并）
   charState[id] = s
-  if (egg) { if (egg.host === id && s.pose && s.pose !== 'idle') endEgg(); return }
+  if (egg) { if (egg.host === own && s.pose && s.pose !== 'idle') endEgg(); return }
   if (id !== charId || !s.pose) return
   lastActive = Date.now()
   if (multi) return   // 正在演多会话：她的样子由各对话的状态决定（refreshMulti），这里不动
@@ -954,6 +971,7 @@ function quotaEvent(id, q) {
   return ev
 }
 function celebrate(id, ev) {
+  if (standsIn(id)) id = charId   // 代演（reactTo）：她响应的 AI 额度刷新了，她来演
   if (id !== charId || egg) { pendingCelebration[id] = { ev, at: Date.now() }; return }  // 等切到她时再演
   // 正在干活：额度记录是 AI 回复的半路写下的，这时演会被紧跟着的干活动作盖掉，看不见——留到这一轮干完（Stop）再演
   if (aiActivity() === 'work') { pendingCelebration[id] = { ev, at: Date.now(), afterWork: true }; return }
@@ -974,7 +992,7 @@ function setQuota(id, q) {
   const ev = quotaEvent(id, q)
   if (ev) celebrate(id, ev)
   if (egg) return
-  if (id === charId || quotaAggregate) renderQuota()   // 聚合时别家额度变了也要重画
+  if (id === charId || quotaAggregate || standsIn(id)) renderQuota()   // 聚合 / 代演时别家额度变了也要重画
   if (id !== charId) return
   if (q?.low && pose === 'idle') { setPose('tired'); if (!wasLow) say(pick(linesOf('tired') || [''])) }
   if (!q?.low && pose === 'tired') setPose('idle')
