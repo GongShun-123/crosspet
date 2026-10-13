@@ -151,7 +151,15 @@ extension App {
             let value = msg["value"]
             switch key {
             case "size":
-                if let n = value as? Double { let v = min(1.6, max(0.6, (n * 100).rounded() / 100)); defaults.set(v, forKey: "size"); animateScale(to: CGFloat(v)) }
+                if let n = value as? Double { let v = min(1.6, max(0.6, (n * 100).rounded() / 100)); defaults.set(v, forKey: "size"); applySizes(animateTo: CGFloat(v)) }
+            case "textSize":   // 单独调文字：同时记为解锁
+                if let n = value as? Double {
+                    defaults.set(min(1.6, max(0.6, (n * 100).rounded() / 100)), forKey: "textSize")
+                    defaults.set(false, forKey: "textLinked")
+                    applySizes()
+                }
+            case "textLinked":
+                defaults.set(value as? Bool ?? true, forKey: "textLinked"); applySizes()
             case "showName":
                 let on = value as? Bool ?? true; defaults.set(on, forKey: "showName"); js("setShowName(\(on))")
             case "aura":

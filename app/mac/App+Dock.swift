@@ -33,7 +33,7 @@ extension App {
     }
     func checkDock() {
         guard edgeDockEnabled, let screen = panel.screen ?? NSScreen.main else { return }
-        let f = panel.frame, vf = screen.visibleFrame, reach = f.width * 0.3
+        let f = panel.frame, vf = screen.visibleFrame, reach = f.width * (Self.baseSize.width / pageSize.width) * 0.3   // 按人物那块的宽算：画布因为文字变宽时不该更容易贴边
         func neighbor(_ left: Bool) -> Bool {
             NSScreen.screens.contains { s in s != screen && s.frame.minY < f.maxY && s.frame.maxY > f.minY &&
                 (left ? abs(s.frame.maxX - screen.frame.minX) < 2 : abs(s.frame.minX - screen.frame.maxX) < 2) }
@@ -102,7 +102,7 @@ extension App {
         let key = side + (peek ? "-peek" : "") + currentIdKey
         let place = { [weak self] (cut: Double) in
             guard let self, self.dock == side, !self.dockOut, self.dockHover == peek else { return }
-            let zoom = f.width / Self.baseSize.width
+            let zoom = f.width / self.pageSize.width
             f.origin.x = side == "left" ? vf.minX - CGFloat(cut) * zoom : vf.maxX - CGFloat(cut) * zoom
             if abs(f.origin.x - self.panel.frame.origin.x) > 1 { self.slide(to: f) }
         }

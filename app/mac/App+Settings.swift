@@ -11,18 +11,51 @@ extension App {
         let v = defaults.double(forKey: "size")
         return v >= 0.6 && v <= 1.6 ? CGFloat(v) : 1
     }
+    /// 文字大小（只在解锁时用）和锁：没存过 = 锁着，文字跟着人物，和以前一样
+    var textScale: Double {
+        let v = defaults.double(forKey: "textSize")
+        return v >= 0.6 && v <= 1.6 ? v : 1
+    }
+    var textLinked: Bool { defaults.object(forKey: "textLinked") as? Bool ?? true }
     var showName: Bool { defaults.object(forKey: "showName") as? Bool ?? true }
     var followApps: Bool { defaults.object(forKey: "followApps") as? Bool ?? true }
     var eggsEnabled: Bool { defaults.object(forKey: "eggs") as? Bool ?? true }
 
-    /// 改大小：窗口和网页一起按比例缩放，底边中点不动（脚下的位置不变）
+    /// 改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放。
+    /// 改人物大小时底边中点不动（脚下的位置不变）；改文字大小时底栏变高 / 变矮多少，窗口底边就往下 / 往上挪多少，人物不动
     func applyScale(_ scale: CGFloat) {
         let old = panel.frame
-        let size = NSSize(width: Self.baseSize.width * scale, height: Self.baseSize.height * scale)
-        let origin = NSPoint(x: old.midX - size.width / 2, y: old.minY)
+        let size = NSSize(width: pageSize.width * scale, height: pageSize.height * scale)
+        var y = old.minY - (pageFoot - shownFoot) * scale
+        // 往下扩出了屏幕：挪回来，但不挪到比原来还高（用户本来就放在边上的不动）
+        if let vf = (panel.screen ?? NSScreen.main)?.visibleFrame, y < vf.minY, y < old.minY { y = min(old.minY, vf.minY) }
+        let origin = NSPoint(x: old.midX - size.width / 2, y: y)
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         web.pageZoom = scale
+        shownFoot = pageFoot
         defaults.set([origin.x, origin.y], forKey: "origin")
+    }
+
+    /// 人物大小 / 文字大小变了：交给网页算画布（规则在 app/web/text-size.js），按回来的尺寸设窗口。
+    /// target：人物大小要动画到哪；nil = 只是文字变了，按现在的人物大小重设一次
+    func applySizes(animateTo target: CGFloat? = nil) {
+        let finish = { [weak self] in
+            guard let self else { return }
+            if let t = target { self.animateScale(to: t) } else { self.applyScale(self.shownScale > 0 ? self.shownScale : self.petScale) }
+        }
+        guard ready else { finish(); return }   // 网页还没加载完：先按旧画布，加载完（didFinish）会再调一次
+        web.evaluateJavaScript("setSizes(\(Double(target ?? petScale)), \(textScale), \(textLinked))") { [weak self] r, _ in
+            guard let self else { return }
+            if let text = r as? String, let data = text.data(using: .utf8),
+               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Double],
+               let w = o["w"], let h = o["h"], let foot = o["foot"] {
+                let page = NSSize(width: w, height: h)
+                if page != self.pageSize || CGFloat(foot) != self.pageFoot { self.dockCut = [:] }   // 画布变了：贴边切口要重新量
+                self.pageSize = page
+                self.pageFoot = CGFloat(foot)
+            }
+            finish()
+        }
     }
 
     /// 拖滑块时每次只变一点，直接跟手；一下子变很多（点「还原」）时用 0.2 秒过渡过去
@@ -73,7 +106,7 @@ extension App {
         let names = defaults.dictionary(forKey: "names") as? [String: String] ?? [:]
         var state: [String: Any] = [
             "version": currentVersion, "platform": "mac",
-            "size": Double(petScale), "showName": showName, "eggs": eggsEnabled, "hideFullscreen": hideInFullscreen, "aura": auraMode, "followApps": followApps,
+            "size": Double(petScale), "textSize": textScale, "textLinked": textLinked, "showName": showName, "eggs": eggsEnabled, "hideFullscreen": hideInFullscreen, "aura": auraMode, "followApps": followApps,
             "gptQuota": defaults.bool(forKey: "gptQuota"), "agyQuota": defaults.bool(forKey: "agyQuota"), "gptQuotaNote": codexNote,
             "login": SMAppService.mainApp.status == .enabled,
             "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "quotaAggregate": quotaAggregate, "powerSave": powerSave,

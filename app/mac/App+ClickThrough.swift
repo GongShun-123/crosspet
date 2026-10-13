@@ -20,7 +20,7 @@ extension App {
                 self?.hitRects = list.filter { $0.count == 4 }.map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
             }
         }
-        let zoom = f.width / Self.baseSize.width   // 网页像素 → 屏幕点
+        let zoom = f.width / pageSize.width   // 网页像素 → 屏幕点（画布可能因为文字大小比 260 宽）
         let point = CGPoint(x: (p.x - f.minX) / zoom, y: (f.maxY - p.y) / zoom)
         let over = hitRects.isEmpty || hitRects.contains { $0.contains(point) }
         if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }

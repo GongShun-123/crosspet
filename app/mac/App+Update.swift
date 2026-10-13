@@ -218,6 +218,7 @@ extension App {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.setDock(side) }
         }
         js("setAuraMode(\(quote(auraMode))); setShowName(\(showName)); setEggsEnabled(\(eggsEnabled)); setPowerSave(\(powerSave)); setQuotaAggregate(\(quotaAggregate))")
+        applySizes()   // 解锁过文字大小的：按画布重设窗口（锁着的尺寸不变）
         updatePageHidden()
         stamps = [:]
         pollStates()
