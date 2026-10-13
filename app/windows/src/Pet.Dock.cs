@@ -58,7 +58,7 @@ namespace CrossPet
             int w = r.Right - r.Left, mid = r.Left + w / 2;
             var scr = Forms.Screen.FromHandle(hwnd);
             var wa = scr.WorkingArea;
-            double reach = w * 0.3;
+            double reach = w * (BaseWidth / pageW) * 0.3;   // 按人物那块的宽算：画布因为文字变宽时不该更容易贴边
             bool Neighbor(bool left) => Forms.Screen.AllScreens.Any(o => !o.Equals(scr) && o.Bounds.Top < r.Bottom && o.Bounds.Bottom > r.Top &&
                 (left ? Math.Abs(o.Bounds.Right - scr.Bounds.Left) < 2 : Math.Abs(o.Bounds.Left - scr.Bounds.Right) < 2));
             if (mid - wa.Left < reach && !Neighbor(true)) SetDock("left");
@@ -128,7 +128,7 @@ namespace CrossPet
                 dockCut[key] = cut;
             }
             if (dock != side || dockOut || dockHover != peek) return;
-            double zoom = (double)w / BaseWidth;   // 网页像素 → 物理像素
+            double zoom = (double)w / pageW;   // 网页像素 → 物理像素
             int tx = side == "left" ? wa.Left - (int)(cut * zoom) : wa.Right - (int)(cut * zoom);
             Native.GetWindowRect(hwnd, out var now);
             if (Math.Abs(now.Left - tx) > 1) Slide(tx, y);

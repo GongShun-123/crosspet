@@ -32,7 +32,7 @@ namespace CrossPet
             if (json == lastHitRects || json == "null") return;
             lastHitRects = json;
             if (!(Store.Json.DeserializeObject(Store.Json.Deserialize<string>(json)) is object[] list)) return;
-            var zoom = Window.Width / BaseWidth;   // 网页像素 → 窗口坐标
+            var zoom = Window.Width / pageW;   // 网页像素 → 窗口坐标（画布可能因为文字大小比 260 宽）
             hit.Children.Clear();
             foreach (var item in list)
             {

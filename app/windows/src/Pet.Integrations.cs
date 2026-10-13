@@ -120,7 +120,7 @@ namespace CrossPet
             var state = new Dictionary<string, object>
             {
                 ["version"] = Store.Version + " Windows", ["platform"] = "windows",
-                ["size"] = Scale, ["showName"] = ShowName, ["eggs"] = EggsEnabled, ["hideFullscreen"] = HideFullscreen, ["aura"] = AuraMode,
+                ["size"] = Scale, ["textSize"] = TextScale, ["textLinked"] = TextLinked, ["showName"] = ShowName, ["eggs"] = EggsEnabled, ["hideFullscreen"] = HideFullscreen, ["aura"] = AuraMode,
                 ["followApps"] = Store.Flag("followApps"), ["followEvents"] = Store.Flag("followEvents"),
                 ["gptQuota"] = Store.Flag("gptQuota"), ["agyQuota"] = Store.Flag("agyQuota"), ["gptQuotaNote"] = codexNote,
                 ["login"] = LoginEnabled, ["edgeDock"] = EdgeDockEnabled, ["dsQuota"] = DsQuotaEnabled, ["quotaAggregate"] = QuotaAggregate, ["powerSave"] = PowerSave,
@@ -167,8 +167,13 @@ namespace CrossPet
                     {
                         case "size":
                             var v = Math.Min(1.6, Math.Max(0.6, Math.Round(Convert.ToDouble(value) * 100) / 100));
-                            Store.Settings["size"] = v; Store.SaveSettings(); AnimateScale(v);
+                            Store.Settings["size"] = v; Store.SaveSettings(); ApplySizes(v);
                             break;
+                        case "textSize":   // 单独调文字：同时记为解锁
+                            Store.Settings["textSize"] = Math.Min(1.6, Math.Max(0.6, Math.Round(Convert.ToDouble(value) * 100) / 100));
+                            Store.Settings["textLinked"] = false; Store.SaveSettings(); ApplySizes();
+                            break;
+                        case "textLinked": Store.Settings["textLinked"] = !(value is bool lb) || lb; Store.SaveSettings(); ApplySizes(); break;
                         case "showName": Store.Settings["showName"] = on; Store.SaveSettings(); Js($"setShowName({(on ? "true" : "false")})"); break;
                         case "hideFullscreen": Store.Settings["hideFullscreen"] = on; Store.SaveSettings(); ApplyLayer(); break;
                         case "hideHotkey": if (value is string hk) { Store.Settings["hideHotkey"] = hk; Store.SaveSettings(); RegisterHideHotKey(); } break;
