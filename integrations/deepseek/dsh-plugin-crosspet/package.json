@@ -9,5 +9,8 @@
     ".": "./lib/index.js",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js"]
+  "files": [
+    "lib/index.js",
+    "lib/balance.js"
+  ]
 }

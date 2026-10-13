@@ -903,6 +903,12 @@ function quotaMemory(update) {
   if (update) { update(m); try { localStorage.setItem('crosspet-quota-memory', JSON.stringify(m)) } catch {} }
   return m
 }
+// 多少算「充值了」：人民币 0.5，美元按差不多的钱算 0.07
+const FEAST_STEP = { CNY: 0.5, USD: 0.07 }
+function feastByCurrency(prev, now) {
+  if (!prev || typeof prev !== 'object') return false
+  return Object.entries(now).some(([c, v]) => typeof v === 'number' && v - (Number(prev[c]) || 0) >= (FEAST_STEP[c] ?? 0.5))
+}
 function quotaEvent(id, q) {
   if (!q) return null
   let ev = null
@@ -914,6 +920,13 @@ function quotaEvent(id, q) {
         if (p && p.reset && now < p.reset - 600 && p.used - w.used >= 15) ev = 'reset'
       }
       m[id] = { ...prev, windows: q.windows }
+    }
+    if (q.balances && typeof q.balances === 'object') {
+      // 按币种分别比（#10）：人民币、美元都可能有，只是顺序变了或币种不同不算充值；某个币种多了才算。
+      // 上次没有按币种的记录（刚从老版本升级）：只记下来，不比，免得拿美元和人民币的数字相减
+      if (feastByCurrency(prev.balances, q.balances)) ev = 'feast'
+      m[id] = { ...(m[id] || prev), balances: q.balances, balance: q.balance }
+      return
     }
     const bal = typeof q.balance === 'number' ? q.balance : parseFloat(((q.text || '').match(/[¥$]\s*([\d.]+)/) || [])[1])
     if (!isNaN(bal)) {

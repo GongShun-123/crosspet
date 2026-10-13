@@ -10,12 +10,13 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { lowThresholds, summarize } from "./balance.js";
 
 export const name = "crosspet";
 export const inject = ["credentials"];
 
 const ID = "deepseek";
-const PLUGIN_VERSION = "1.3.2";  // 出现在 deepseek-plugin.json 里，用来确认跑的是哪一版插件
+const PLUGIN_VERSION = "1.3.5";  // 出现在 deepseek-plugin.json 里，用来确认跑的是哪一版插件
 const BIG_JOB_TOOLS = 8;
 const BALANCE_EVERY_MS = 10 * 60 * 1000;
 
@@ -55,7 +56,7 @@ function failed(result) {
 export function apply(ctx, config = {}) {
   const data = process.env.CROSSPET_DATA_DIR || join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "CrossPet");
   const dir = config.stateDir || process.env.CROSSPET_STATE_DIR || (process.platform === "win32" ? join(data, "state") : "/tmp/crosspet");
-  const lowBalance = typeof config.lowBalance === "number" ? config.lowBalance : 5;
+  const lowBalance = lowThresholds(config.lowBalance);  // 按币种的门槛，见 balance.js
   let tools = 0;
 
   let writes = 0;
@@ -274,11 +275,11 @@ export function apply(ctx, config = {}) {
   }
   const setQuota = (q) => { lastQuota = q; return publishQuota(); };
 
-  const show = (total, currency, available = true) => setQuota({
-    text: `余额 ${currency === "USD" ? "$" : "¥"}${total.toFixed(2)}`,
-    balance: total,  // 桌宠比对用：余额变多（充值）时播「大口吃白饭」
-    low: !available || total < lowBalance,
-  });
+  // entries：[{ currency, amount }]。显示、余额低、充值比对的规则都在 balance.js（两条路共用）
+  const show = (entries, available = true) => {
+    const q = summarize(entries, { available, low: lowBalance });
+    return q ? setQuota(q).then(() => "ok") : "no-balance";
+  };
 
   async function balanceByKey() {
     const hit = await ctx.credentials.resolve("DEEPSEEK_API_KEY");
@@ -288,10 +289,9 @@ export function apply(ctx, config = {}) {
     });
     if (!res.ok) return `HTTP ${res.status}`;
     const body = await res.json();
-    const info = body?.balance_infos?.[0];
-    if (!info) return "no-balance";
-    await show(Number(info.total_balance) || 0, info.currency, body.is_available !== false);
-    return "ok";
+    // 有人民币也有美元时一次返回两项，顺序不固定（#10）：全部按币种读，不取第 0 项
+    const infos = Array.isArray(body?.balance_infos) ? body.balance_infos : [];
+    return show(infos.map((i) => ({ currency: i?.currency, amount: i?.total_balance })), body?.is_available !== false);
   }
 
   async function balanceByAccount() {
@@ -301,13 +301,9 @@ export function apply(ctx, config = {}) {
     });
     if (r === null) return "not-signed-in";
     if (r?.status !== "ready") return "failed";
-    // 现金钱包 + 赠送钱包，人民币优先
+    // 现金钱包 + 赠送钱包，同一币种加在一起，各币种分别显示
     const wallets = [...(r.value || []), ...(r.bonusWallets || [])];
-    const currency = wallets.some((w) => w.currency === "CNY") ? "CNY" : wallets[0]?.currency;
-    if (!currency) return "no-balance";
-    const total = wallets.filter((w) => w.currency === currency).reduce((sum, w) => sum + (Number(w.balance) || 0), 0);
-    await show(total, currency);
-    return "ok";
+    return show(wallets.map((w) => ({ currency: w?.currency, amount: w?.balance })));
   }
 
   // 每次查余额都把过程记到 deepseek-plugin.json（只有结果代码，没有 Key / 令牌），
