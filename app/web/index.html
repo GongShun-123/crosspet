@@ -367,7 +367,7 @@ function show(p, urgent) {
 function init(m) {
   manifest = m
   for (const c of Object.values(m.characters))
-    for (const list of Object.values(c.poses)) for (const u of list) { const i = new Image(); i.src = u }
+    for (const list of Object.values(c.poses)) for (const u of list) { const i = new Image(); i.onerror = () => window.chrome?.webview?.postMessage({ imageError: u }); i.src = u }   // 预加载失败也报（页面里的监听收不到）
   if (!charId || !manifest.characters[charId]) setCharacter(Object.keys(m.characters).find(k => !m.characters[k].egg), true)
   else { $('caption').textContent = char().name }
 }
