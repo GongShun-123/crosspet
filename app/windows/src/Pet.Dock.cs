@@ -33,6 +33,8 @@ namespace CrossPet
         /// <summary>DeepSeek 余额（默认开）：用别家订阅（OpenCode Go……）跑 DeepSeek 模型时官方账户没钱，她会一直没精神，可以关掉</summary>
         /// <summary>省电模式（默认关）：特效每秒 15 帧、闲着 10 秒就停（平时 30 帧、30 秒）</summary>
         static bool PowerSave => Store.Settings.TryGetValue("powerSave", out var v) && v is bool b && b;
+        /// <summary>额度合并显示（默认关）：小窗把各家 AI 的额度排成几行，而不是只显示当前角色的。怎么排在网页里（quota-aggregate.js）</summary>
+        static bool QuotaAggregate => Store.Flag("quotaAggregate");
         static bool DsQuotaEnabled => !(Store.Settings.TryGetValue("dsQuota", out var v) && v is bool b && !b);
         static bool EdgeDockEnabled => !(Store.Settings.TryGetValue("edgeDock", out var v) && v is bool b && !b);
         static void After(int ms, Action a)

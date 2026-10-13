@@ -76,7 +76,7 @@ extension App {
             "size": Double(petScale), "showName": showName, "eggs": eggsEnabled, "hideFullscreen": hideInFullscreen, "aura": auraMode, "followApps": followApps,
             "gptQuota": defaults.bool(forKey: "gptQuota"), "agyQuota": defaults.bool(forKey: "agyQuota"), "gptQuotaNote": codexNote,
             "login": SMAppService.mainApp.status == .enabled,
-            "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "powerSave": powerSave,
+            "edgeDock": edgeDockEnabled, "dsQuota": dsQuotaEnabled, "quotaAggregate": quotaAggregate, "powerSave": powerSave,
             "hideHotkey": hideHotkey, "hotkeyFailed": hotkeyFailed, "hotkeys": [["id": "off", "label": "不用快捷键"]] + Self.hotkeyChoices.map { ["id": $0.id, "label": $0.label] },
             "aiAutostart": aiAutostart,
             "character": currentId ?? characterIds.first ?? "",
