@@ -35,6 +35,12 @@ input[type=text], select { font: inherit; color: var(--ink); background: var(--f
 input[type=text] { width: 150px; }
 input[type=range] { width: 150px; accent-color: var(--accent); }
 .val { width: 40px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* 文字大小旁边的锁：像 PS 改图像大小的锁链。锁着 = 文字跟着人物 */
+.link { padding: 2px 6px; line-height: 0; color: var(--muted); }
+/* 锁按钮和上一行的「还原」一样宽，两根滑块才对得齐（两个平台字体不同，用最小宽度） */
+[data-reset-size], .link { min-width: 52px; }
+.link svg { width: 16px; height: 16px; }
+.link.on { color: var(--accent); border-color: var(--accent); }
 /* 开关 */
 .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -68,8 +74,11 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 </nav>
 
 <div class="card" data-tab="look">
-  <div class="item"><div class="label">大小</div>
+  <div class="item"><div class="label">人物大小</div>
     <div class="ctl"><input type="range" id="size" min="0.6" max="1.6" step="0.01"><span class="val" id="sizeVal"></span><button data-reset-size>还原</button></div></div>
+  <div class="item"><div class="label">文字大小<small id="textNote">名牌、气泡、额度的字；锁着时跟人物一样大</small></div>
+    <div class="ctl"><input type="range" id="textSize" min="0.6" max="1.6" step="0.01"><span class="val" id="textSizeVal"></span>
+      <button class="link" id="textLink" title="锁着时文字跟着人物大小"></button></div></div>
   <div class="item"><div class="label">显示名字<small>名牌下面的额度不受影响</small></div>
     <div class="ctl"><label class="switch"><input type="checkbox" data-key="showName"><span></span></label></div></div>
   <div class="item"><div class="label">背景光晕<small>深色背景上会变成一圈亮光，「自动」时深色模式下不显示</small></div>
@@ -129,6 +138,7 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 
 <div id="toast"></div>
 
+<script src="text-size.js"></script>
 <script>
 // 和宿主（macOS 的 WKWebView / Windows 的 WebView2）通信：页面发 {cmd, ...}，宿主改完设置后调 setState(state) 把最新状态推回来
 const post = msg => window.chrome?.webview ? window.chrome.webview.postMessage(msg) : window.webkit?.messageHandlers?.settings?.postMessage(msg)
@@ -148,6 +158,11 @@ function setState(s) {
   document.querySelector('[data-action=update]').disabled = !!s.updating
   if (document.activeElement !== $('size')) $('size').value = s.size
   $('sizeVal').textContent = Math.round(s.size * 100) + '%'
+  // 文字大小：锁着时显示的就是人物大小（规则在 text-size.js）
+  const linked = s.textLinked !== false, text = TextSize.effectiveText(s.size, s.textSize, s.textLinked)
+  if (document.activeElement !== $('textSize')) $('textSize').value = text
+  $('textSizeVal').textContent = Math.round(text * 100) + '%'
+  showLink(linked)
   for (const el of document.querySelectorAll('[data-key]')) el.checked = !!s[el.dataset.key]
   for (const el of document.querySelectorAll('[data-only]')) el.classList.toggle('hidden', s[el.dataset.only] === undefined || s[el.dataset.only] === null)
   for (const b of $('aura').children) b.classList.toggle('on', b.dataset.v === s.aura)
@@ -213,8 +228,33 @@ function notice(text) { toast(text) }
 for (const el of document.querySelectorAll('[data-key]')) el.onchange = () => post({ cmd: 'set', key: el.dataset.key, value: el.checked })
 for (const b of $('aura').children) b.onclick = () => post({ cmd: 'set', key: 'aura', value: b.dataset.v })
 for (const b of document.querySelectorAll('[data-action]')) b.onclick = () => post({ cmd: 'action', name: b.dataset.action })
-$('size').oninput = () => { $('sizeVal').textContent = Math.round($('size').value * 100) + '%'; post({ cmd: 'set', key: 'size', value: +$('size').value }) }
-document.querySelector('[data-reset-size]').onclick = () => post({ cmd: 'set', key: 'size', value: 1 })
+// 锁链图标：锁着 = 两节扣在一起；解开 = 断开
+const LINK_ON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 01-3.5-3.5l1-1"/></svg>'
+const LINK_OFF = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 01-3.5-3.5l1-1M3 3l1.5 1.5M13 13l-1.5-1.5"/></svg>'
+function showLink(linked) {
+  const b = $('textLink'); b.innerHTML = linked ? LINK_ON : LINK_OFF; b.classList.toggle('on', linked)
+  b.title = linked ? '锁着：文字跟着人物大小。点一下解开，单独调文字' : '已解开：文字单独调。点一下锁上，文字回到和人物一样大'
+}
+const pct = v => Math.round(v * 100) + '%'
+$('size').oninput = () => {
+  const v = +$('size').value
+  $('sizeVal').textContent = pct(v)
+  if (state?.textLinked !== false) { $('textSize').value = v; $('textSizeVal').textContent = pct(v) }   // 锁着：文字滑块跟着动
+  post({ cmd: 'set', key: 'size', value: v })
+}
+// 单独拖文字：外壳收到 textSize 就记为解锁
+$('textSize').oninput = () => {
+  const v = +$('textSize').value
+  $('textSizeVal').textContent = pct(v); showLink(false)
+  if (state) state.textLinked = false
+  post({ cmd: 'set', key: 'textSize', value: v })
+}
+// 点锁：锁着时解开（文字先等于当前人物大小，看着不变）；解开时锁上（文字回到和人物一样）
+$('textLink').onclick = () => state?.textLinked === false
+  ? post({ cmd: 'set', key: 'textLinked', value: true })
+  : post({ cmd: 'set', key: 'textSize', value: +$('size').value })
+// 还原：人物、文字都回 100%，并锁上
+document.querySelector('[data-reset-size]').onclick = () => { post({ cmd: 'set', key: 'size', value: 1 }); post({ cmd: 'set', key: 'textLinked', value: true }) }
 $('hideHotkey').onchange = () => post({ cmd: 'set', key: 'hideHotkey', value: $('hideHotkey').value })
 $('character').onchange = () => {
   const [id, skin] = $('character').value.split('|')
