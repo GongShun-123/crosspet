@@ -31,18 +31,25 @@ namespace CrossPet
         // ---- GPT 额度：什么时候拿、从哪拿（来源见 CodexQuota.cs，规则见 docs/superpowers/specs/2026-10-12-codex-quota-design.md）----
         enum CodexWhy { Now, TurnEnd, Tick }
         DateTime codexLiveAt = DateTime.MinValue;       // 上次问服务的时间（不管成没成）
+        DateTime? codexBusyAt;                           // Codex 最近一次干活的事件（不是 Stop）；Stop 后清掉。干活时额度查得勤一点
         bool codexInFlight, sessionLocked;
         Dictionary<string, object> codexLast; DateTime codexLastAt;   // 最后一次问到的额度：问不到时接着显示它，并标上时间
         string codexNote = "";                           // 从没问到过时的原因，设置里那个开关下面显示
         string lastGptQuota = "还没读过", lastGptLogKey;
 
-        /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次。藏着、锁屏时定时的不查
+        /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：见 CodexTickDue。藏着、锁屏时定时的不查
+        /// （和 macOS 版 App+Quota.swift 一致）
+        /// <summary>定时到点时要不要问：Codex 在干活（10 分钟内有不是 Stop 的事件，长命令中途可能好几分钟没事件）1 分钟一次，
+        /// 闲着 2 分钟一次。实测一次约 0.15 秒 CPU（macOS），每分钟一次平均约 0.25% 一个核心。定时器每 60 秒一跳有一两秒误差，门槛各留 5 秒。
+        /// 和 macOS 的 App.codexTickDue 一样（那边有测试 tests/codex_quota_probe.sh）</summary>
+        static bool CodexTickDue(double since, double? busyAgo) => since >= (busyAgo.HasValue && busyAgo.Value < 600 ? 55 : 115);
+
         async void RefreshCodexQuota(CodexWhy why)
         {
             if (!ready || !Store.Flag("gptQuota") || codexInFlight) return;
             if (why == CodexWhy.Tick && (userHidden || sessionLocked)) return;
             var since = (DateTime.UtcNow - codexLiveAt).TotalSeconds;
-            var ask = why == CodexWhy.Now || (why == CodexWhy.TurnEnd && since >= 20) || (why == CodexWhy.Tick && since >= 300);
+            var ask = why == CodexWhy.Now || (why == CodexWhy.TurnEnd && since >= 20) || (why == CodexWhy.Tick && CodexTickDue(since, codexBusyAt.HasValue ? (DateTime.UtcNow - codexBusyAt.Value).TotalSeconds : (double?)null));
             if (!ask) return;
             // 找程序（枚举进程）、问服务（可能要经过 WSL）都放到后台，别卡住桌宠；同一时间只跑一个
             codexInFlight = true; codexLiveAt = DateTime.UtcNow;

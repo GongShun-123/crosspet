@@ -41,6 +41,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     // GPT 额度 用的
     var codexLiveAt = Date.distantPast       // 上次问服务的时间（不管成没成）
+    var codexBusyAt: Date?   // Codex 最近一次干活的事件（不是 Stop）；Stop 后清掉。干活时额度查得勤一点
     var codexInFlight = false
     var codexLast: (rateLimits: [String: Any], at: Date)?   // 最后一次问到的额度：问不到时接着显示它，并标上时间
     var codexNote = ""                       // 从没问到过时的原因，设置里那个开关下面显示

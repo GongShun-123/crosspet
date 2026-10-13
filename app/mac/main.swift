@@ -24,6 +24,13 @@ if CommandLine.arguments.contains("--codex-quota-probe") {
     print(String(decoding: d, as: UTF8.self)); exit(0)
 }
 
+// 测试用：定时到点时要不要问 GPT 额度，打印 yes / no 就退出（tests/codex_quota_probe.sh）。参数：离上次问过几秒、离上次干活几秒（-1 = 没有）
+if let i = CommandLine.arguments.firstIndex(of: "--codex-tick-probe") {
+    let n = CommandLine.arguments.dropFirst(i + 1).compactMap { Double($0) }
+    guard n.count == 2 else { print("参数不对"); exit(1) }
+    print(App.codexTickDue(since: n[0], busyAgo: n[1] < 0 ? nil : n[1]) ? "yes" : "no"); exit(0)
+}
+
 // 测试用：算一次「换大小时窗口放在哪」，打印 x y 宽 高 就退出（tests/window_place_probe.sh）
 if let i = CommandLine.arguments.firstIndex(of: "--window-place-probe") {
     let a = Array(CommandLine.arguments.dropFirst(i + 1))

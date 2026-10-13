@@ -7,8 +7,8 @@ extension App {
     // MARK: GPT 额度（可选，默认关）：什么时候拿、从哪拿（来源见文件末尾 CodexQuotaSource）
     enum CodexWhy { case now, turnEnd, tick }
 
-    /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：5 分钟问一次。
-    /// 藏着、屏幕休眠时定时的不查
+    /// 打开额度显示 / 页面就绪：马上问；Codex 回完一轮：隔 20 秒以上才问；定时（每分钟）：见 codexTickDue。
+    /// 藏着、屏幕休眠时定时的不查（和 Windows 版 Pet.Quota.cs 一致）
     func refreshCodexQuota(_ why: CodexWhy) {
         guard ready, defaults.bool(forKey: "gptQuota"), !codexInFlight else { return }
         if why == .tick && (screensAsleep || userHidden) { return }
@@ -17,7 +17,7 @@ extension App {
         switch why {
         case .now: askLive = true
         case .turnEnd: askLive = since >= 20
-        case .tick: askLive = since >= 300
+        case .tick: askLive = Self.codexTickDue(since: since, busyAgo: codexBusyAt.map { Date().timeIntervalSince($0) })
         }
         if !askLive { return }
         codexLiveAt = Date()
@@ -33,6 +33,14 @@ extension App {
             guard let bin = CodexQuotaSource.findBinary() else { finish(nil, "没找到 codex 程序", 0); return }
             CodexQuotaSource.queryLive(binary: bin, done: finish)
         }
+    }
+
+    /// 定时到点时要不要问：Codex 在干活（10 分钟内有不是 Stop 的事件，长命令中途可能好几分钟没事件）1 分钟一次，
+    /// 闲着 2 分钟一次（别处用了 Codex 也能较快跟上）。实测一次约 0.15 秒 CPU，每分钟一次平均约 0.25% 一个核心。
+    /// 定时器每 60 秒一跳会有一两秒误差，门槛各留 5 秒（tests/codex_quota_probe.sh 测）
+    static func codexTickDue(since: TimeInterval, busyAgo: TimeInterval?) -> Bool {
+        let busy = busyAgo.map { $0 < 600 } ?? false
+        return since >= (busy ? 55 : 115)
     }
 
     /// 交给网页：问到了就是 live；没问到、但以前问到过，就接着显示最后一次的数（stale，网页标上是几点的数据）；从没问到过就不显示

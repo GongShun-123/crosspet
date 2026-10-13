@@ -29,8 +29,11 @@ extension App {
                 if pauseRealEvents { continue }
                 js(kind == "state" ? "applyCharState(\(quote(id)), \(text))" : "setQuota(\(quote(id)), \(text))")
                 // Codex 回完一轮：额度记录刚写进会话，马上读一次（不然要等每分钟一次的定时刷新）
-                if kind == "state", id == "gpt", text.contains("\"event\": \"Stop\"") || text.contains("\"event\":\"Stop\"") {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refreshCodexQuota(.turnEnd) }
+                if kind == "state", id == "gpt" {
+                    if text.contains("\"event\": \"Stop\"") || text.contains("\"event\":\"Stop\"") {
+                        codexBusyAt = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refreshCodexQuota(.turnEnd) }
+                    } else { codexBusyAt = stamp }   // 在干活：定时查额度改成 1 分钟一次（codexTickDue）
                 }
             }
         }

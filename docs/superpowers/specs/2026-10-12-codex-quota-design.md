@@ -104,3 +104,10 @@ Codex 自带一个本地服务 `codex app-server`（Codex 桌面版就是通过�
 - Windows：在 loki 的 Windows 电脑上看诊断列出的 `codex` 程序，再验证同样几项
 - WSL：模拟 `\\wsl.localhost` 下的会话目录验证合并挑选；WSL 没开时确认不访问（不拉起发行版）；在有 WSL 的 Windows 上实测（loki 的 Windows 或反馈用户）
 - 回归：1.3.2 的「干活途中刷新 → 干完演 reset」不受影响
+
+## 修订 2（2026-10-13）：定时查询改快
+
+用户希望额度跟得更快。实测（macOS，真实 Codex 连问 6 次）：一次约 3 秒（主要等网络）、约 0.15 秒 CPU、临时 130MB 内存。
+「平时每 5 分钟」改成：Codex 在干活（10 分钟内有不是 Stop 的事件）每 1 分钟、闲着每 2 分钟；定时器误差各留 5 秒（55 / 115 秒）。
+每分钟一次平均约 0.25% 一个核心。不再压到 30 秒以下：OpenAI 查用量接口的频率限制未知。规则在 `App.codexTickDue` / `Pet.CodexTickDue`，`tests/codex_quota_probe.sh` 测
+

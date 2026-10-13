@@ -37,5 +37,14 @@ touch "$D/rollout-a.jsonl"; sleep 1; touch "$D/rollout-b.jsonl"   # b 文件更�
 out=$(CODEX_HOME="$REC" CROSSPET_CODEX_BIN="$FAKE" FAKE_CODEX_MODE=auth "$BIN" --codex-quota-probe)
 echo "$out" | grep -q '"source":"none"' && ! echo "$out" | grep -q 'used_percent' && echo "PASS records-ignored" || { echo "FAIL 不该再读会话记录 $out"; fail=1; }
 rm -rf "$REC"
+# 定时（每分钟一次）到点时要不要问：Codex 在干活（10 分钟内有不是 Stop 的事件）1 分钟问一次，闲着 2 分钟一次
+# 参数：离上次问过了几秒 离 Codex 最近一次干活事件几秒（-1 = 没有 / 已经 Stop）
+# 程序不认识这个参数时会当成正常启动、一直开着：最多等 5 秒
+tick() { got=$(perl -e 'alarm 5; exec @ARGV' "$BIN" --codex-tick-probe "$1" "$2" 2>/dev/null || echo "（没有输出）"); [ "$got" = "$3" ] && echo "PASS tick $4" || { echo "FAIL tick $4：期望 $3，得到 $got"; fail=1; }; }
+tick 58 30 yes "干活中、定时器早到 2 秒也算到点"
+tick 40 30 no "干活中、刚问过"
+tick 58 -1 no "闲着、才 1 分钟"
+tick 118 -1 yes "闲着、2 分钟（定时器早到 2 秒）"
+tick 70 700 no "上次干活是 10 分钟前：算闲着"
 rm -rf "$EMPTY"
 exit $fail
