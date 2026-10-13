@@ -2,7 +2,8 @@
 <html><head><meta charset="utf-8">
 <style>
 @property --aura { syntax: '<color>'; inherits: true; initial-value: #ffd9b0; }
-:root { --aura: #ffd9b0; --aura-o: .35; }
+/* --k：文字区域（气泡、名牌、额度）相对人物再放大多少，外壳调 setSizes 设；锁着时 1 */
+:root { --aura: #ffd9b0; --aura-o: .35; --k: 1; }
 html, body { margin: 0; background: transparent; overflow: hidden; -webkit-user-select: none; cursor: default;
   font-family: -apple-system, "PingFang SC", sans-serif; }
 /* 从下往上排：底栏（名牌 + 额度）固定高度贴着窗口底边，人物在它上面，气泡从人物头顶往上长。
@@ -10,10 +11,12 @@ html, body { margin: 0; background: transparent; overflow: hidden; -webkit-user-
    （Windows 上微软雅黑行高大，之前开着名牌、台词折两三行时额度会被挤出去） */
 #wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100vh; }
 #wrap > * { flex-shrink: 0; }
-#foot { min-height: 62px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
-#bubble { position: relative; z-index: 3; margin-bottom: -10px; max-width: 228px; min-height: 18px; margin-top: 4px; padding: 5px 11px; border-radius: 12px;
-  background: rgba(255,255,255,.95); border: 1.5px solid var(--accent, #e0b48a); color: #4a2418;
-  font-size: 13px; line-height: 1.35; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.12);
+/* 底栏最小高度按 max(1, k)：字比人小时不缩，人物不往下掉 */
+#foot { min-height: calc(62px * max(1, var(--k))); flex-shrink: 0; display: flex; flex-direction: column; align-items: center; }
+#bubble { position: relative; z-index: 3; margin-bottom: calc(-10px * var(--k)); max-width: calc(228px * var(--k)); min-height: calc(18px * var(--k));
+  margin-top: calc(4px * var(--k)); padding: calc(5px * var(--k)) calc(11px * var(--k)); border-radius: calc(12px * var(--k));
+  background: rgba(255,255,255,.95); border: calc(1.5px * var(--k)) solid var(--accent, #e0b48a); color: #4a2418;
+  font-size: calc(13px * var(--k)); line-height: 1.35; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,.12);
   transition: opacity .3s, transform .3s; }
 #bubble.hide { opacity: 0; transform: translateY(4px); }
 #stage { position: relative; width: 250px; height: 241px; transition: transform .32s ease, opacity .32s ease; }
@@ -80,25 +83,26 @@ html.tucked-art #body { animation: none !important; transform: none !important; 
 .m-leave { animation: leave 1s ease-in forwards; }
 @keyframes leave { 0% { transform: none; } 100% { transform: translateX(28%) rotate(4deg); opacity: 0; } }
 @keyframes dash { 0%, 55% { transform: none; } 100% { transform: translateX(28%) rotate(4deg); opacity: 0; } }
-#caption { margin-top: -2px; padding: 2px 9px; border-radius: 8px; background: rgba(255,255,255,.85);
-  color: #6b4a3a; font-size: 11px; min-height: 14px; }
+#caption { margin-top: calc(-2px * var(--k)); padding: calc(2px * var(--k)) calc(9px * var(--k)); border-radius: calc(8px * var(--k)); background: rgba(255,255,255,.85);
+  color: #6b4a3a; font-size: calc(11px * var(--k)); min-height: calc(14px * var(--k)); }
 #caption:empty { visibility: hidden; }
 html.no-name #caption { display: none; }
-#quota { max-width: 236px; text-align: center; line-height: 1.35; margin-top: 2px; padding: 1px 8px; border-radius: 7px; background: rgba(255,255,255,.8); color: #6b4a3a; font-size: 10px; }
+#quota { max-width: calc(236px * var(--k)); text-align: center; line-height: 1.35; margin-top: calc(2px * var(--k)); padding: calc(1px * var(--k)) calc(8px * var(--k));
+  border-radius: calc(7px * var(--k)); background: rgba(255,255,255,.8); color: #6b4a3a; font-size: calc(10px * var(--k)); }
 #quota:empty { display: none; }
 #quota div { white-space: nowrap; }
 #quota.low { color: #c0392b; background: rgba(255,236,236,.92); }
 /* 额度合并显示：一家 AI 一行，名字一列、每个额度窗口一列（quota-aggregate.js），只有紧张的百分比变红 */
 #quota.agg:not(:empty) { display: grid; justify-content: center; text-align: left; font-variant-numeric: tabular-nums; }
-#quota .qn { white-space: nowrap; padding-right: 7px; font-weight: 600; }
-#quota .qc { white-space: nowrap; padding: 0 6px; }
+#quota .qn { white-space: nowrap; padding-right: calc(7px * var(--k)); font-weight: 600; }
+#quota .qc { white-space: nowrap; padding: 0 calc(6px * var(--k)); }
 #quota .qn + .qc { padding-left: 0; }
 #quota .qc + .qc { border-left: 1px solid rgba(107,74,58,.25); }
 #quota .qc .low { color: #c0392b; font-weight: 700; }
-/* 四家都有时 4 行要塞进底栏（#foot 的 62px 预算里额度小窗最多约 43px），人物才不会被顶上去 */
-#quota.tight { font-size: 9px; line-height: 1.1; }
-#quota.tight .qc { padding: 0 4px; }
-#quota.tight .qn { padding-right: 5px; }
+/* 四家都有时 4 行要塞进底栏（#foot 的 62px 预算里额度小窗最多约 43px），人物才不会被顶上去；字放大时预算也按 k 放大 */
+#quota.tight { font-size: calc(9px * var(--k)); line-height: 1.1; }
+#quota.tight .qc { padding: 0 calc(4px * var(--k)); }
+#quota.tight .qn { padding-right: calc(5px * var(--k)); }
 
 /* 身体动作：切换时用 animation 平滑接上 */
 .m-bob   { animation: bob 3.2s ease-in-out infinite; }
@@ -153,6 +157,7 @@ html.no-name #caption { display: none; }
   <div id="foot"><div id="caption"></div><div id="quota"></div></div>
 </div>
 <script src="effects.js"></script>
+<script src="text-size.js"></script>
 <script src="codex-quota.js"></script>
 <script src="quota-aggregate.js"></script>
 <script>
@@ -278,6 +283,13 @@ function setPose(p, instant) {
 }
 // 名牌上的名字：设置里可以关掉（额度照常显示）
 function setShowName(on) { document.documentElement.classList.toggle('no-name', !on) }
+// 文字大小（设置里和人物大小分开调）：外壳交来人物大小、文字大小、锁没锁；这里定好文字区域放大多少（--k），
+// 把画布尺寸交回外壳去设窗口（窗口 = 画布 × 人物大小）。规则在 text-size.js；锁着时 k = 1，和以前一样
+function setSizes(size, textSize, linked) {
+  const L = TextSize.layout(size, TextSize.effectiveText(size, textSize, linked))
+  document.documentElement.style.setProperty('--k', String(L.k))
+  return JSON.stringify({ w: L.w, h: L.h, foot: L.foot })
+}
 // 背景光晕：'auto'（跟着系统深浅色）/ 'on' / 'off'，由宿主调用
 function setAuraMode(mode) {
   const c = document.documentElement.classList
