@@ -365,7 +365,7 @@ namespace CrossPet
         // ---- 藏起来 / 露出来 ----
         // 不用 Window.Hide() / Show()：透明分层窗口里嵌着显卡渲染的 WebView2，反复藏和放有概率让 WPF 的渲染线程挂掉
         // （0x88980406 UCEERR_RENDERTHREADFAILURE），之后画面冻住、摸头没反应，只有网页还在跑（1.3.2 用户反馈）。
-        // 改成「隐身」：窗口一直开着，不透明度 0（透明分层窗口全透明的地方鼠标直接穿过去）、取消置顶（不压在全屏游戏 / 视频上面），网页动画暂停
+        // 改成「隐身」：窗口一直开着，不透明度 0、鼠标穿透、取消置顶（不压在全屏游戏 / 视频上面），网页动画暂停
         bool concealed;
         void SetConcealed(bool c)
         {
@@ -373,6 +373,8 @@ namespace CrossPet
             concealed = c;
             if (c) { Window.Opacity = 0; if (hwnd != IntPtr.Zero) Native.DropFromTop(hwnd); }
             else { Window.Opacity = 1; Raise(); }
+            // 藏着时鼠标穿过整个窗口（只靠不透明度 0 点不透，原因见 ConcealStyle.ClickThrough）
+            if (hwnd != IntPtr.Zero) Native.SetWindowLong(hwnd, Native.GWL_EXSTYLE, ConcealStyle.ClickThrough(Native.GetWindowLong(hwnd, Native.GWL_EXSTYLE), c));
             UpdatePageHidden();
         }
         /// 置顶（层级要求置顶、又没在隐身时）

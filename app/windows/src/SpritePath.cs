@@ -5,7 +5,7 @@ namespace CrossPet
 {
     /// <summary>立绘请求 https://crosspet.data/characters/&lt;角色&gt;/&lt;图&gt; → 角色目录里的文件。
     /// 只认这一种形状、只给 .webp / .png，别的（设置、character.json、目录跳转）一律不给。
-    /// 不依赖 WebView2，tests/windows/SpritePathTests 在 macOS 上也能测</summary>
+    /// 不依赖 WebView2，tests/windows/LogicTests 在 macOS 上也能测</summary>
     static class SpritePath
     {
         public static bool TryResolve(string charactersRoot, string absolutePath, out string file, out string mime)
