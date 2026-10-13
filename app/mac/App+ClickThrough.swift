@@ -8,6 +8,10 @@ extension App {
     // 窗口比桌宠大（给动作、气泡留的空间）：鼠标不在桌宠本体、气泡、名牌、额度上时让窗口不接鼠标，点击落到后面的窗口
 
     func updateClickThrough() {
+        if userHidden || hiddenForFullscreen {   // 收着：透明的窗口不能接鼠标（下面会按命中区域反复切换，这里先拦住）
+            if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }
+            return
+        }
         let p = NSEvent.mouseLocation, f = panel.frame
         guard f.contains(p) else { updateDockHover(false); return }
         if NSEvent.pressedMouseButtons != 0 { return }   // 正在拖、正在点：别中途换
@@ -57,6 +61,16 @@ extension App {
         applyLayer()
     }
 
+    /// 收起来 / 放回来（全屏时收着、快捷键藏起来）：只改透明度和鼠标，窗口始终在所有桌面里。
+    /// 不 orderOut：退出全屏程序的那一刻窗口如果是摘下来的，「所有桌面都显示」就失效了，
+    /// 之后再放回来也只在退出全屏的那个桌面有她（isOnActiveSpace 为 false，别的桌面上右键也没反应）
+    func applyHiddenState() {
+        let hidden = userHidden || hiddenForFullscreen
+        panel.alphaValue = hidden ? 0 : 1
+        if hidden { panel.ignoresMouseEvents = true }
+        updatePageHidden()
+    }
+
     func applyFullscreenBehavior() {
         panel.collectionBehavior = hideInFullscreen ? [.canJoinAllSpaces, .stationary] : [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         checkFullscreen()
@@ -72,7 +86,8 @@ extension App {
         guard full != hiddenForFullscreen else { return }
         hiddenForFullscreen = full
         if full {
-            panel.orderOut(nil)
+            // 不 orderOut：窗口一直留着，只是透明、不接鼠标、动画停掉（hiddenForFullscreen 的 didSet 里做，
+            // 原因见 applyHiddenState；Windows 也是这么藏的）
         } else {
             panel.orderFrontRegardless()
             if layerMode != "always" { orderBelowFrontWindow() }
