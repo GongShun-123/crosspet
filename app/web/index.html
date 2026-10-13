@@ -401,7 +401,8 @@ function init(m) {
   manifest = m
   for (const c of Object.values(m.characters))
     for (const list of Object.values(c.poses)) for (const u of list) { const i = new Image(); i.src = u }
-  if (!charId || !manifest.characters[charId]) setCharacter(Object.keys(m.characters).find(k => !m.characters[k].egg), true)
+  // 没有当前角色时取 id 排序后的第一个：macOS 的清单是 Swift 字典序列化出来的，key 顺序每次启动都不同（Windows 本来就是排好序的）
+  if (!charId || !manifest.characters[charId]) setCharacter(Object.keys(m.characters).sort().find(k => !m.characters[k].egg), true)
   else { $('caption').textContent = char().name }
 }
 
