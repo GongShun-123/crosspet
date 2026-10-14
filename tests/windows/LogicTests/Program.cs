@@ -50,11 +50,11 @@ static class Program
             return q == null ? "null" : q["text"] + " | low=" + q["low"];
         }
         var a1 = Agy("ultra-only-model");
-        Check("Gemini：不可用的模型不算进额度（" + a1 + "）", a1.StartsWith("Gemini/Claude/GPT-OSS 剩余 100%") && !a1.Contains("｜") && a1.EndsWith("low=False"));
+        Check("Gemini：不可用的模型不算进额度（" + a1 + "）", a1.StartsWith("Gemini 剩余 100%") && a1.Contains(" ｜ Claude/GPT 剩余 100% |") && a1.EndsWith("low=False"));
         var a2 = Agy("gemini-used-up");
-        Check("Gemini：真用完了还是 0%（" + a2 + "）", a2.StartsWith("Gemini 剩余 0%") && a2.Contains("Claude/GPT-OSS 剩余 100%") && a2.EndsWith("low=True"));
+        Check("Gemini：真用完了还是 0%（" + a2 + "）", a2.StartsWith("Gemini 剩余 0%") && a2.Contains(" ｜ Claude/GPT 剩余 100% |") && a2.EndsWith("low=True"));
         var a3 = Agy("two-pools-with-unavailable");
-        Check("Gemini：两个池 + 不可用模型（" + a3 + "）", a3.StartsWith("Gemini 剩余 52%") && a3.Contains("Claude/GPT-OSS 剩余 99%") && !a3.Contains(" 0%") && a3.EndsWith("low=False"));
+        Check("Gemini：两个池 + 不可用模型（" + a3 + "）", a3.StartsWith("Gemini 剩余 52%") && a3.Contains(" ｜ Claude/GPT 剩余 99% |") && !a3.Contains(" 0%") && a3.EndsWith("low=False"));
 
         Console.WriteLine(fails == 0 ? "全部通过" : $"{fails} 项失败");
         return fails == 0 ? 0 : 1;

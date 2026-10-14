@@ -130,38 +130,39 @@ extension App {
         }.resume()
     }
 
-    /// 额度按「额度池」共享（比如所有 Gemini 模型一个池，Claude 和 GPT-OSS 一个池）：
-    /// 按 (剩余比例, 重置时间) 分组，每组用模型家族名命名，Gemini 池排前面。
+    /// 额度按「额度池」共享：Gemini 模型一个池，Claude 和 GPT 模型一个池（Antigravity 的「View Usage」也是这两组）。
+    /// 固定显示这两行，Gemini 在前。
     /// 不写死「5 小时 / 每周」：24 小时内重置显示时刻，否则显示日期，免费版和会员都适用。
     static func antigravityQuota(_ obj: Any) -> [String: Any]? {
         guard let st = (obj as? [String: Any])?["userStatus"] as? [String: Any],
               let cfg = st["cascadeModelConfigData"] as? [String: Any],
               let models = cfg["clientModelConfigs"] as? [[String: Any]] else { return nil }
-        var pools: [(key: String, left: Double, reset: Date?, families: [String])] = []
+        // 固定两行，和 Antigravity 自己「View Usage」的分组一样：Gemini 模型一行，Claude 和 GPT 模型一行。
+        // 数字相同也不合并（以前按「剩余 + 重置时间」合并，行数会变来变去，和 Antigravity 对不上）。和 Windows 版 AntigravityQuota.Parse 一致
+        var groups: [(name: String, left: Double, reset: Date?)] = []
         let iso = ISO8601DateFormatter()
         for m in models {
             guard let qi = m["quotaInfo"] as? [String: Any] else { continue }
             // 不可用的模型不算：比如只给 Ultra 套餐的「Gemini 4 Argon」，别的账号里标着 disabled、额度信息是空的，
-            // 以前被当成「剩 0%」排在第一行（2026-10-14 两位用户反馈）。和 Windows 版 AntigravityQuota.Parse 一致
+            // 以前被当成「剩 0%」排在第一行（2026-10-14 两位用户反馈）
             if m["disabled"] as? Bool == true || (qi["remainingFraction"] == nil && qi["resetTime"] == nil) { continue }
             let left = (qi["remainingFraction"] as? NSNumber)?.doubleValue ?? 0  // 用完时这个字段会被省略（但还有重置时间）
-            let resetText = qi["resetTime"] as? String ?? ""
-            let family = (m["label"] as? String ?? "").split(separator: " ").first.map(String.init) ?? "?"
-            let key = "\(left)|\(resetText)"
-            if let i = pools.firstIndex(where: { $0.key == key }) {
-                if !pools[i].families.contains(family) { pools[i].families.append(family) }
+            let reset = (qi["resetTime"] as? String).flatMap { iso.date(from: $0) }
+            let name = (m["label"] as? String ?? "").hasPrefix("Gemini") ? "Gemini" : "Claude/GPT"
+            if let i = groups.firstIndex(where: { $0.name == name }) {
+                if left < groups[i].left { groups[i].left = left; groups[i].reset = reset ?? groups[i].reset }
             } else {
-                pools.append((key, left, iso.date(from: resetText), [family]))
+                groups.append((name, left, reset))
             }
         }
-        guard !pools.isEmpty else { return nil }
-        pools.sort { ($0.families.contains("Gemini") ? 0 : 1, $0.left) < ($1.families.contains("Gemini") ? 0 : 1, $1.left) }
-        let minLeft = pools.map { $0.left }.min() ?? 1
+        guard !groups.isEmpty else { return nil }
+        groups.sort { ($0.name == "Gemini" ? 0 : 1) < ($1.name == "Gemini" ? 0 : 1) }
+        let minLeft = groups.map { $0.left }.min() ?? 1
         let fmt = DateFormatter()
-        let parts = pools.enumerated().map { i, p -> String in
-            var piece = "\(p.families.joined(separator: "/")) 剩余 \(Int((p.left * 100).rounded()))%"
-            // 重置时间标在排第一的池（有 Gemini 时就是 Gemini 池）上；别的池快用完了也标
-            if i == 0 || p.left <= 0.1, let d = p.reset {
+        let parts = groups.enumerated().map { i, g -> String in
+            var piece = "\(g.name) 剩余 \(Int((g.left * 100).rounded()))%"
+            // 重置时间标在第一行（Gemini）上；别的那行快用完了也标
+            if i == 0 || g.left <= 0.1, let d = g.reset {
                 fmt.dateFormat = d.timeIntervalSinceNow < 86400 ? "HH:mm" : "M/d"
                 piece += " · \(fmt.string(from: d)) 重置"
             }
