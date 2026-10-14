@@ -159,7 +159,7 @@ namespace CrossPet
                 core.Settings.AreDevToolsEnabled = false;
                 core.Settings.IsZoomControlEnabled = false;
                 core.Settings.IsStatusBarEnabled = false;
-                web.ZoomFactor = Scale * zoomFix;   // 修正系数见 ZoomFix（网页加载完会量一次）
+                web.ZoomFactor = Scale;
                 // 网页进程 / 浏览器进程崩溃（显卡驱动、系统睡眠醒来、内存不够时偶尔会）：不处理的话她就一直停住，
                 // 之后每次调网页都报「控件已失效」
                 core.ProcessFailed += (_, a) => Window.Dispatcher.BeginInvoke(new Action(() => _ = RecoverWeb(a.ProcessFailedKind)));
