@@ -38,7 +38,7 @@ namespace CrossPet
                     Js($"setAppInfo({info})");
                     Boot();
                 };
-                web.CoreWebView2.Navigate($"https://{Store.AppHost}/devconsole.html");
+                web.CoreWebView2.Navigate(Store.PageUrl("devconsole.html"));
             };
         }
 
@@ -104,7 +104,7 @@ namespace CrossPet
                     if (Store.Json.DeserializeObject(e.WebMessageAsJson) is Dictionary<string, object> msg)
                         try { pet.HandleSettings(msg); } catch (Exception ex) { Store.Log("设置出错: " + ex); }
                 };
-                web.CoreWebView2.Navigate($"https://{Store.AppHost}/settings.html");
+                web.CoreWebView2.Navigate(Store.PageUrl("settings.html"));
             };
         }
 
@@ -140,7 +140,7 @@ namespace CrossPet
                     if (Store.Json.DeserializeObject(e.WebMessageAsJson) is Dictionary<string, object> msg)
                         try { pet.HandleFeedback(msg); } catch (Exception ex) { Store.Log("反馈出错: " + ex); }
                 };
-                web.CoreWebView2.Navigate($"https://{Store.AppHost}/feedback.html");
+                web.CoreWebView2.Navigate(Store.PageUrl("feedback.html"));
             };
         }
 

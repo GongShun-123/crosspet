@@ -144,6 +144,7 @@ namespace CrossPet
             timer.Start();
         }
 
+        int imageErrors;
         async Task InitWeb()
         {
             try
@@ -175,13 +176,25 @@ namespace CrossPet
                     }
                     ready = true;
                     ApplySizes(anchor: Anchor.Corner);   // 解锁过文字大小的：按画布重设窗口，左上角不动（锁着的尺寸不变）
+                    After(1000, PassThroughBrowserWindows); After(5000, PassThroughBrowserWindows);   // 背后的浏览器窗口不接鼠标（见 PassThroughBrowserWindows）
                     stamps.Clear();
                     Poll();
                     RefreshQuota();
                     RefreshCodexQuota(CodexWhy.Now);
                     FollowForeground();
                 };
-                core.Navigate($"https://{Store.AppHost}/index.html");
+                // 立绘加载失败时网页发消息过来：记进日志（每次启动最多 5 条），反馈里能看出是哪张图、为什么
+                core.WebMessageReceived += (_, a) =>
+                {
+                    try
+                    {
+                        if (imageErrors >= 5 || !(Store.Json.DeserializeObject(a.WebMessageAsJson) is Dictionary<string, object> m) || !m.TryGetValue("imageError", out var src)) return;
+                        imageErrors++;
+                        Store.Log($"立绘加载失败: {src}");
+                    }
+                    catch { }
+                };
+                core.Navigate(Store.PageUrl("index.html"));
             }
             catch (Exception e)
             {
@@ -220,11 +233,12 @@ namespace CrossPet
             catch (Exception e) { Store.Log("WebView2 恢复失败: " + e); }
         }
 
-        /// <summary>两个虚拟域名：程序自带的网页（安装目录）、角色立绘和数据（数据目录）。只在这两个域名里加载，外部网页一律不开</summary>
+        /// <summary>两个虚拟域名：程序自带的网页（安装目录\web，文件夹映射）、角色立绘（数据目录\characters，程序自己读文件，
+        /// 不能用文件夹映射，原因见 SpriteResources）。只在网页的域名里导航，外部网页一律不开</summary>
         public static void Map(CoreWebView2 core)
         {
             core.SetVirtualHostNameToFolderMapping(Store.AppHost, Path.Combine(Store.Install, "web"), CoreWebView2HostResourceAccessKind.Allow);
-            core.SetVirtualHostNameToFolderMapping(Store.DataHost, Store.Data, CoreWebView2HostResourceAccessKind.Allow);
+            SpriteResources.Attach(core);
             core.NavigationStarting += (_, a) => { if (!a.Uri.StartsWith($"https://{Store.AppHost}/")) a.Cancel = true; };
             core.NewWindowRequested += (_, a) => a.Handled = true;
         }
