@@ -88,6 +88,9 @@ namespace CrossPet
             Every(TimeSpan.FromMilliseconds(250), () => { _ = UpdateHitRects(); });
             Every(TimeSpan.FromMilliseconds(80), UpdateDockHover);
 
+            // 换 DPI 时 WPF 先按新缩放排好窗口再发这个事件；等这一轮排版走完再让网页控件对齐（原因见 ResyncWebForDpi）
+            Window.DpiChanged += (_, e) => Window.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                new Action(() => ResyncWebForDpi(e.OldDpi.DpiScaleX, e.NewDpi.DpiScaleX)));
             Window.Loaded += async (_, __) => await InitWeb();
             Window.Show();
 

@@ -80,6 +80,19 @@ namespace CrossPet
             catch (Exception e) { Store.Log("检查网页缩放出错: " + e.Message); }
         }
 
+        /// <summary>系统缩放变了（改了缩放、拖到缩放不同的另一块屏幕）：WebView2CompositionControl 只在自己的大小（DIP）变时
+        /// 才按新 DPI 重算网页区域的物理像素（它的 SizeChanged → SyncControllerBounds），换 DPI 时 DIP 大小不变，网页区域就停在旧的
+        /// 像素尺寸上，网页却按新缩放画，结果裁掉一截，重启才好（1.3.5 测试在 100%→150% 复现）。这里把它的宽度缩 1 再放回，逼它重算</summary>
+        void ResyncWebForDpi(double oldDpi, double newDpi)
+        {
+            if (web == null) return;
+            Store.Log($"系统缩放变了：{Math.Round(oldDpi * 100)}% → {Math.Round(newDpi * 100)}%，网页区域重新对齐");
+            web.Width = Math.Max(1, web.ActualWidth - 1); web.UpdateLayout();   // 缩小（放大会超出窗口，不一定真的变）
+            web.Width = double.NaN; web.UpdateLayout();
+            lastHitRects = null; dockCut.Clear();   // 可点区域、贴边切口都按新像素重新量
+            CheckZoomSoon();   // 再量一次网页大小：还对不上的话日志里会有「网页缩放没按设的生效」
+        }
+
         /// <summary>改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放；放在哪见 Anchor</summary>
         void ApplyScale(double scale, Anchor anchor = Anchor.Bottom)
         {
