@@ -94,7 +94,7 @@ extension App {
         let f = panel.frame
         let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(f.insetBy(dx: 40, dy: 40)) }
         L.append("窗口 \(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height))\(onScreen ? "" : "（不在任何屏幕里）")；"
-                 + "显示中 \(panel.isVisible ? "是" : "否")，没被挡住 \(panel.occlusionState.contains(.visible) ? "是" : "否")，因全屏收着 \(hiddenForFullscreen ? "是" : "否")；"
+                 + "显示中 \(panel.isVisible ? "是" : "否")，没被挡住 \(panel.occlusionState.contains(.visible) ? "是" : "否")，因全屏收着 \(hiddenForFullscreen ? "是" : "否")，快捷键藏着 \(userHidden ? "是" : "否")，透明度 \(panel.alphaValue)；"
                  + "层级 \(layerMode)（现在\(panel.level == .floating ? "置顶" : "普通")）；贴边 \(dock ?? "无")\(dock != nil ? (dockOut ? "·跑出来了" : "·缩着") : "")；大小 \(Int(petScale * 100))%")
         let skins = (defaults.dictionary(forKey: "skins") as? [String: String]) ?? [:]
         L.append("角色 \(currentId ?? "-")\(skins.isEmpty ? "" : "，衣服 \(skins)")；设置：名字 \(showName ? "开" : "关")，光晕 \(auraMode)，省电 \(powerSave ? "开" : "关")，彩蛋 \(eggsEnabled ? "开" : "关")，"

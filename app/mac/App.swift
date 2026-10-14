@@ -52,7 +52,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var agyPort: (pid: Int32, port: Int)?
 
     // 快捷键隐藏 用的
-    var userHidden = false
+    var userHidden = false {
+        didSet { if userHidden != oldValue { applyHiddenState() } }   // 快捷键藏起来：和全屏时收着一样，只是透明
+    }
     var hotKeyRef: EventHotKeyRef?
     var hotKeyHandlerInstalled = false
     var hotkeyFailed = false
@@ -78,7 +80,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     // 点击穿透 用的
     var hitRects: [CGRect] = []
     var hitRectsAt = Date.distantPast
-    var hiddenForFullscreen = false
+    var hiddenForFullscreen = false {
+        didSet { if hiddenForFullscreen != oldValue { applyHiddenState() } }   // 透明度 / 鼠标 / 动画都跟着这个标记走
+    }
     var fullscreenCheckedAt = Date.distantPast
     var fullscreenOverride = false   // 全屏时你点菜单栏图标叫她出来：切换空间 / 前台程序之前不再收起来
 
