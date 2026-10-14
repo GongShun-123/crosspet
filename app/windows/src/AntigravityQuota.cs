@@ -15,7 +15,7 @@ namespace CrossPet
     /// Antigravity 自己的界面就是这样拿额度的。令牌从它的启动参数里取（每次启动随机生成、只在本机有效，不是账号凭据），
     /// 只在内存里用，只发给 127.0.0.1；只信任本机的自签名证书。Antigravity 没开就不显示。
     /// </summary>
-    static class AntigravityQuota
+    static partial class AntigravityQuota
     {
         static readonly HttpClient http = new HttpClient(new HttpClientHandler
         {
@@ -30,11 +30,14 @@ namespace CrossPet
             if (server == null) return null;
             var (pid, token) = server.Value;
             var ports = cachedPid == pid ? new List<int> { cachedPort } : ListeningPorts(pid);
+            // 每个端口先问「额度汇总」（和 Antigravity 的「View Usage」同一份数据，刚对话完就更新），旧版没有这个接口时退回「用户状态」
+            // （里面的额度是缓存，会慢几分钟；2026-10-14 实测 View Usage 已经 98%，用户状态里还是 100%）。和 macOS 版 askAntigravity 一致
             foreach (var port in ports)
+            foreach (var method in new[] { "RetrieveUserQuotaSummary", "GetUserStatus" })
             {
                 try
                 {
-                    var req = new HttpRequestMessage(HttpMethod.Post, $"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetUserStatus")
+                    var req = new HttpRequestMessage(HttpMethod.Post, $"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/{method}")
                     {
                         Content = new StringContent("{\"metadata\":{\"ideName\":\"antigravity\",\"extensionName\":\"antigravity\",\"locale\":\"en\"}}", Encoding.UTF8, "application/json"),
                     };
@@ -109,39 +112,6 @@ namespace CrossPet
             }
             finally { Marshal.FreeHGlobal(buf); }
             return ports;
-        }
-
-        /// <summary>
-        /// 额度按「额度池」共享（比如所有 Gemini 模型一个池，Claude 和 GPT-OSS 一个池）：按 (剩余比例, 重置时间) 分组，
-        /// 每组用模型家族名命名，Gemini 池排前面；重置时间标在第一个池和快用完的池上。和 macOS 版 antigravityQuota 一样。
-        /// </summary>
-        public static Dictionary<string, object> Parse(object obj)
-        {
-            if (!(obj is Dictionary<string, object> root) || !(root.TryGetValue("userStatus", out var st) && st is Dictionary<string, object> status)) return null;
-            if (!(status.TryGetValue("cascadeModelConfigData", out var cfg) && cfg is Dictionary<string, object> config)) return null;
-            if (!(config.TryGetValue("clientModelConfigs", out var ms) && ms is object[] models)) return null;
-            var pools = new List<(string key, double left, DateTime? reset, List<string> families)>();
-            foreach (var m in models.OfType<Dictionary<string, object>>())
-            {
-                if (!(m.TryGetValue("quotaInfo", out var qi) && qi is Dictionary<string, object> info)) continue;
-                var left = info.TryGetValue("remainingFraction", out var f) ? Convert.ToDouble(f) : 0;   // 用完时这个字段会被省略
-                var resetText = info.TryGetValue("resetTime", out var r) ? r as string ?? "" : "";
-                var family = ((m.TryGetValue("label", out var l) ? l as string : null) ?? "?").Split(' ')[0];
-                var key = left + "|" + resetText;
-                var i = pools.FindIndex(p => p.key == key);
-                if (i >= 0) { if (!pools[i].families.Contains(family)) pools[i].families.Add(family); }
-                else pools.Add((key, left, DateTime.TryParse(resetText, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) ? d.ToLocalTime() : (DateTime?)null, new List<string> { family }));
-            }
-            if (pools.Count == 0) return null;
-            pools = pools.OrderBy(p => p.families.Contains("Gemini") ? 0 : 1).ThenBy(p => p.left).ToList();
-            var parts = pools.Select((p, i) =>
-            {
-                var piece = $"{string.Join("/", p.families)} 剩余 {(int)Math.Round(p.left * 100)}%";
-                if ((i == 0 || p.left <= 0.1) && p.reset is DateTime d)
-                    piece += $" · {((d - DateTime.Now).TotalHours < 24 ? d.ToString("HH:mm") : $"{d.Month}/{d.Day}")} 重置";
-                return piece;
-            });
-            return new Dictionary<string, object> { ["text"] = string.Join(" ｜ ", parts), ["low"] = pools.Min(p => p.left) <= 0.1 };
         }
     }
 }

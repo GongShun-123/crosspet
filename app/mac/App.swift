@@ -96,6 +96,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     // 接入 AI 用的
     var integrated: [String]?
+    var pluginStatus = "[]"      // 插件版本（接入工具的只读检查 integrate.py plugins，JSON 数组），桌宠和设置页据此提醒更新
 
     // 接入被别的工具冲掉时接回去 用的
     var claudeConfigStamp: Date?

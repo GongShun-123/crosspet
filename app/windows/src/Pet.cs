@@ -88,6 +88,9 @@ namespace CrossPet
             Every(TimeSpan.FromMilliseconds(250), () => { _ = UpdateHitRects(); });
             Every(TimeSpan.FromMilliseconds(80), UpdateDockHover);
 
+            // 换 DPI 时 WPF 先按新缩放排好窗口再发这个事件；等这一轮排版走完再让网页控件对齐（原因见 ResyncWebForDpi）
+            Window.DpiChanged += (_, e) => Window.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                new Action(() => ResyncWebForDpi(e.OldDpi.DpiScaleX, e.NewDpi.DpiScaleX)));
             Window.Loaded += async (_, __) => await InitWeb();
             Window.Show();
 
@@ -181,6 +184,7 @@ namespace CrossPet
                     Poll();
                     RefreshQuota();
                     RefreshCodexQuota(CodexWhy.Now);
+                    RefreshPlugins(tellPet: true);   // 插件旧了：等她闲下来提醒一句
                     FollowForeground();
                 };
                 // 立绘加载失败时网页发消息过来：记进日志（每次启动最多 5 条），反馈里能看出是哪张图、为什么

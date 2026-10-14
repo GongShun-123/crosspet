@@ -2,7 +2,7 @@
 // - 监听 Harness 的工作事件（收到消息 / 调工具 / 子任务 / 一轮结束），写 <状态目录>/<角色>-state.json
 //   Harness 能接好几家模型：按会话实际在用的模型选角色（DeepSeek / GPT / Claude / Gemini），
 //   当前角色另外记在 deepseek-host.json，桌宠切到 Harness 窗口时按它换角色
-// - 每 10 分钟查一次余额（有 API Key 用 Key；没有就用 Harness 里登录的账号），写 <状态目录>/deepseek-quota.json
+// - 每 1 分钟查一次余额（发消息、一轮结束时也查，30 秒内只查一次）（有 API Key 用 Key；没有就用 Harness 里登录的账号），写 <状态目录>/deepseek-quota.json
 // - 跟着 AI 出现：Harness 启动、新会话、发消息时，桌宠没开着就把它打开（用户从菜单退出后到 Harness 重开前不管；在设置 / 插件配置 autostart: false 里关掉了也不管）
 // 状态目录默认 /tmp/crosspet，可在插件配置里改 stateDir。插件只观察，不改变 DeepSeek 的任何行为。
 import { mkdir, rename, writeFile } from "node:fs/promises";
@@ -16,9 +16,9 @@ export const name = "crosspet";
 export const inject = ["credentials"];
 
 const ID = "deepseek";
-const PLUGIN_VERSION = "1.3.4";  // 出现在 deepseek-plugin.json 里，用来确认跑的是哪一版插件
+const PLUGIN_VERSION = "1.3.5";  // 出现在 deepseek-plugin.json 里，用来确认跑的是哪一版插件
 const BIG_JOB_TOOLS = 8;
-const BALANCE_EVERY_MS = 10 * 60 * 1000;
+const BALANCE_EVERY_MS = 60 * 1000;   // 定时查余额：充了值、没再对话，最多等 1 分钟（以前 10 分钟，用户充值后半天没变）。只是要一次账户余额，不耗 token
 
 function poseForTool(name, args) {
   const t = String(name ?? "").toLowerCase();
@@ -158,6 +158,7 @@ export function apply(ctx, config = {}) {
       ensurePet("发消息");
       tools = 0;
       state("listening", "UserPromptSubmit");
+      pollBalanceSoon();   // 充完值回来一说话，余额马上跟上
     }
     return next();
   });
@@ -173,6 +174,7 @@ export function apply(ctx, config = {}) {
   ctx.on("agent/turn-stopping", () => {
     state(tools >= BIG_JOB_TOOLS ? "proud" : "happy", "Stop");
     tools = 0;
+    pollBalanceSoon();   // 这一轮花掉的钱
   });
   // 要你授权：只旁听，决定原样交回给 Harness。自动放行的请求也会经过这里，
   // 所以超过 0.4 秒还没答复（真的在等人）才换成等你回答的表情，免得干活时一闪一闪
@@ -311,7 +313,17 @@ export function apply(ctx, config = {}) {
   const diagnose = (info) => writeJson(`${ID}-plugin.json`, { plugin: PLUGIN_VERSION, at: new Date().toISOString(),
     accountService: !!account?.getBalance, ...info }).catch(() => {});
 
+  // 发消息、一轮结束时也查：间隔太近（默认 30 秒内查过）就不再查，连着对话时不会问得太勤。
+  // 查余额只是向 DeepSeek 官方要一次账户余额，不消耗 token。balanceGapMs 可在插件配置里改（测试时设 0）
+  const balanceGap = typeof config.balanceGapMs === "number" ? config.balanceGapMs : 30 * 1000;
+  let lastPollAt = 0;
+  function pollBalanceSoon() {
+    if (Date.now() - lastPollAt < balanceGap) return;
+    pollBalance();
+  }
+
   async function pollBalance() {
+    lastPollAt = Date.now();
     let byKey = "not-tried", byAccount = "not-tried";
     try {
       byKey = await balanceByKey().catch((e) => `error: ${String(e?.message ?? e)}`);

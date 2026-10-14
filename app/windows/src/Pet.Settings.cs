@@ -47,6 +47,57 @@ namespace CrossPet
             return (x, old.Bottom - h);
         }
 
+        // ---- 网页大小核对：只记日志（原因见 ZoomCheck）----
+        double shownZoom;   // 窗口现在按的人物大小
+        DispatcherTimer zoomCheckTimer;
+        /// <summary>调完大小 / 换完缩放停 1 秒再量（拖滑块时每一帧都在变，别每帧都量）</summary>
+        void CheckZoomSoon()
+        {
+            if (zoomCheckTimer == null)
+            {
+                zoomCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                zoomCheckTimer.Tick += (_, __) => { zoomCheckTimer.Stop(); _ = CheckZoom(); };
+            }
+            zoomCheckTimer.Stop(); zoomCheckTimer.Start();
+        }
+        async Task<(double, double)?> PageSize()
+        {
+            var json = await Eval("JSON.stringify([innerWidth, innerHeight])");
+            if (!(Store.Json.DeserializeObject(Store.Json.Deserialize<string>(json)) is object[] a) || a.Length != 2) return null;
+            return (Convert.ToDouble(a[0]), Convert.ToDouble(a[1]));
+        }
+        /// <summary>隔 0.5 秒量两次网页实际排出来的大小，两次一样又和应有的画布对不上，记一行日志</summary>
+        async Task CheckZoom()
+        {
+            if (!ready || web?.CoreWebView2 == null || shownZoom <= 0) return;
+            try
+            {
+                var first = await PageSize();
+                await Task.Delay(500);
+                var second = await PageSize();
+                if (first == null || second == null) return;
+                var (w1, h1) = first.Value; var (w2, h2) = second.Value;
+                if (ZoomCheck.Off(pageW, pageH, w1, h1, w2, h2))
+                    Store.Log($"网页大小和画布对不上（只记录）：网页 {Math.Round(w2)}×{Math.Round(h2)}，应为 {Math.Round(pageW)}×{Math.Round(pageH)}，缩放 {Num(Math.Round(web.ZoomFactor, 3))}，DPI {Math.Round(VisualTreeHelper.GetDpi(Window).DpiScaleX * 100)}%");
+            }
+            catch (Exception e) { Store.Log("检查网页大小出错: " + e.Message); }
+        }
+
+        /// <summary>系统缩放变了（改了缩放、拖到缩放不同的另一块屏幕）：WebView2CompositionControl 只在自己的大小（DIP）变时
+        /// 才按新 DPI 重算网页区域的物理像素（它的 SizeChanged → SyncControllerBounds），换 DPI 时 DIP 大小不变，网页区域就停在旧的
+        /// 像素尺寸上，网页却按新缩放画，结果裁掉一截，重启才好（1.3.5 测试在 100%→150% 复现）。这里把它的宽度缩 1 再放回，逼它重算</summary>
+        double resyncedDpi;   // 上次对齐时的缩放：同一次换缩放 DpiChanged 会来两遍（1.3.5 测试日志里每次两行），只对齐一次
+        void ResyncWebForDpi(double oldDpi, double newDpi)
+        {
+            if (web == null || Math.Abs(newDpi - resyncedDpi) < 0.001) return;
+            resyncedDpi = newDpi;
+            Store.Log($"系统缩放变了：{Math.Round(oldDpi * 100)}% → {Math.Round(newDpi * 100)}%，网页区域重新对齐");
+            web.Width = Math.Max(1, web.ActualWidth - 1); web.UpdateLayout();   // 缩小（放大会超出窗口，不一定真的变）
+            web.Width = double.NaN; web.UpdateLayout();
+            lastHitRects = null; dockCut.Clear();   // 可点区域、贴边切口都按新像素重新量
+            CheckZoomSoon();   // 再量一次网页大小：还对不上的话日志里会有「网页大小和画布对不上」
+        }
+
         /// <summary>改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放；放在哪见 Anchor</summary>
         void ApplyScale(double scale, Anchor anchor = Anchor.Bottom)
         {
@@ -54,6 +105,8 @@ namespace CrossPet
             Window.Width = pageW * scale; Window.Height = pageH * scale;
             Window.UpdateLayout();
             if (web != null) web.ZoomFactor = scale;
+            shownZoom = scale;
+            CheckZoomSoon();
             Native.GetWindowRect(hwnd, out var now);
             int w = now.Right - now.Left, h = now.Bottom - now.Top;
             double footPx = pageFoot * w / pageW;   // 网页像素 → 物理像素（含系统缩放）
