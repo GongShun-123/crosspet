@@ -56,6 +56,14 @@ static class Program
         var a3 = Agy("two-pools-with-unavailable");
         Check("Gemini：两个池 + 不可用模型（" + a3 + "）", a3.StartsWith("Gemini 剩余 52%") && a3.Contains(" ｜ Claude/GPT 剩余 99% |") && !a3.Contains(" 0%") && a3.EndsWith("low=False"));
 
+        var s1 = Agy("summary-live");
+        Check("Gemini 汇总：两组各一行，98%（" + s1 + "）", s1.StartsWith("Gemini 剩余 100%") && s1.Contains(" ｜ Claude/GPT 剩余 98% |") && s1.EndsWith("low=False"));
+        var s2 = Agy("summary-gemini-used-up");
+        Check("Gemini 汇总：比例被省略算 0%（" + s2 + "）", s2.StartsWith("Gemini 剩余 0%") && s2.EndsWith("low=True"));
+        var s3 = Agy("summary-two-windows");
+        Check("Gemini 汇总：两个窗口各一行（" + s3 + "）", s3.StartsWith("Gemini 今日 剩余 40%") && s3.Contains(" ｜ Gemini 本周 剩余 100%") && s3.Contains(" ｜ Claude/GPT 剩余 98% |"));
+        Check("Gemini 汇总：空的不显示", Agy("summary-empty") == "null");
+
         Console.WriteLine(fails == 0 ? "全部通过" : $"{fails} 项失败");
         return fails == 0 ? 0 : 1;
     }

@@ -107,9 +107,13 @@ extension App {
         return String(data: data, encoding: .utf8)
     }
 
-    func askAntigravity(pid: Int32, token: String, ports: [Int]) {
+    /// 每个端口先问「额度汇总」（RetrieveUserQuotaSummary：和 Antigravity 的「View Usage」同一份数据，刚对话完就更新），
+    /// 旧版 Antigravity 没有这个接口时退回「用户状态」（GetUserStatus：里面的额度是模型列表顺带的一份缓存，会慢几分钟）。
+    /// 2026-10-14 实测：View Usage 已经 98%，用户状态里还是 100%。和 Windows 版 AntigravityQuota.Read 一致
+    static let agyMethods = ["RetrieveUserQuotaSummary", "GetUserStatus"]
+    func askAntigravity(pid: Int32, token: String, ports: [Int], method: Int = 0) {
         guard let port = ports.first else { return }
-        var req = URLRequest(url: URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/GetUserStatus")!)
+        var req = URLRequest(url: URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/\(Self.agyMethods[method])")!)
         req.httpMethod = "POST"
         req.timeoutInterval = 5
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -119,7 +123,10 @@ extension App {
         agySession!.dataTask(with: req) { [weak self] data, resp, _ in
             guard let self else { return }
             guard (resp as? HTTPURLResponse)?.statusCode == 200, let data,
-                  let obj = try? JSONSerialization.jsonObject(with: data), let q = Self.antigravityQuota(obj) else {
+                  let obj = try? JSONSerialization.jsonObject(with: data), let q = Self.antigravityParse(obj) else {
+                if method + 1 < Self.agyMethods.count {   // 这个端口换旧接口再问一次
+                    self.askAntigravity(pid: pid, token: token, ports: ports, method: method + 1); return
+                }
                 self.agyPort = nil
                 self.askAntigravity(pid: pid, token: token, ports: Array(ports.dropFirst()))  // 换下一个端口试
                 return
@@ -130,7 +137,44 @@ extension App {
         }.resume()
     }
 
-    /// 额度按「额度池」共享：Gemini 模型一个池，Claude 和 GPT 模型一个池（Antigravity 的「View Usage」也是这两组）。
+    /// 额度汇总或用户状态，哪种都认（汇总优先）
+    static func antigravityParse(_ obj: Any) -> [String: Any]? { antigravitySummary(obj) ?? antigravityQuota(obj) }
+
+    /// 额度汇总（RetrieveUserQuotaSummary）：Antigravity 自己分好组（「Gemini Models」「Claude and GPT models」），
+    /// 每组一个或几个窗口（本周 / 今日……）。每个窗口一行；一组只有一个窗口时不写窗口名，和用户状态那条路显示得一样
+    static func antigravitySummary(_ obj: Any) -> [String: Any]? {
+        guard let groups = ((obj as? [String: Any])?["response"] as? [String: Any])?["groups"] as? [[String: Any]] else { return nil }
+        let iso = ISO8601DateFormatter()
+        var rows: [(name: String, left: Double, reset: Date?)] = []
+        let sorted = groups.enumerated().sorted { a, b in
+            let ga = (a.element["displayName"] as? String ?? "").contains("Gemini") ? 0 : 1, gb = (b.element["displayName"] as? String ?? "").contains("Gemini") ? 0 : 1
+            return ga != gb ? ga < gb : a.offset < b.offset
+        }.map { $0.element }
+        for g in sorted {
+            let title = g["displayName"] as? String ?? ""
+            let name = title.contains("Gemini") ? "Gemini" : title.contains("Claude") || title.contains("GPT") ? "Claude/GPT" : title
+            let buckets = g["buckets"] as? [[String: Any]] ?? []
+            for b in buckets {
+                // 比例为 0 时会被省略（protobuf 转 JSON 不写默认值）：窗口在、比例不在 = 用完了
+                let left = (b["remainingFraction"] as? NSNumber)?.doubleValue ?? 0
+                let window = ["weekly": "本周", "daily": "今日"][b["window"] as? String ?? ""] ?? (b["displayName"] as? String ?? "")
+                rows.append((buckets.count > 1 ? "\(name) \(window)" : name, left, (b["resetTime"] as? String).flatMap { iso.date(from: $0) }))
+            }
+        }
+        guard !rows.isEmpty else { return nil }
+        let fmt = DateFormatter()
+        let parts = rows.enumerated().map { i, r -> String in
+            var piece = "\(r.name) 剩余 \(Int((r.left * 100).rounded()))%"
+            if i == 0 || r.left <= 0.1, let d = r.reset {   // 重置时间标在第一行和快用完的行上
+                fmt.dateFormat = d.timeIntervalSinceNow < 86400 ? "HH:mm" : "M/d"
+                piece += " · \(fmt.string(from: d)) 重置"
+            }
+            return piece
+        }
+        return ["text": parts.joined(separator: " ｜ "), "low": (rows.map { $0.left }.min() ?? 1) <= 0.1]
+    }
+
+    /// 用户状态（GetUserStatus，旧版 Antigravity 的退路）：额度按「额度池」共享：Gemini 模型一个池，Claude 和 GPT 模型一个池（Antigravity 的「View Usage」也是这两组）。
     /// 固定显示这两行，Gemini 在前。
     /// 不写死「5 小时 / 每周」：24 小时内重置显示时刻，否则显示日期，免费版和会员都适用。
     static func antigravityQuota(_ obj: Any) -> [String: Any]? {

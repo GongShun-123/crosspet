@@ -30,11 +30,14 @@ namespace CrossPet
             if (server == null) return null;
             var (pid, token) = server.Value;
             var ports = cachedPid == pid ? new List<int> { cachedPort } : ListeningPorts(pid);
+            // 每个端口先问「额度汇总」（和 Antigravity 的「View Usage」同一份数据，刚对话完就更新），旧版没有这个接口时退回「用户状态」
+            // （里面的额度是缓存，会慢几分钟；2026-10-14 实测 View Usage 已经 98%，用户状态里还是 100%）。和 macOS 版 askAntigravity 一致
             foreach (var port in ports)
+            foreach (var method in new[] { "RetrieveUserQuotaSummary", "GetUserStatus" })
             {
                 try
                 {
-                    var req = new HttpRequestMessage(HttpMethod.Post, $"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/GetUserStatus")
+                    var req = new HttpRequestMessage(HttpMethod.Post, $"https://127.0.0.1:{port}/exa.language_server_pb.LanguageServerService/{method}")
                     {
                         Content = new StringContent("{\"metadata\":{\"ideName\":\"antigravity\",\"extensionName\":\"antigravity\",\"locale\":\"en\"}}", Encoding.UTF8, "application/json"),
                     };

@@ -35,7 +35,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--codex-tick-probe") {
 if let i = CommandLine.arguments.firstIndex(of: "--agy-quota-probe") {
     guard i + 1 < CommandLine.arguments.count, let data = FileManager.default.contents(atPath: CommandLine.arguments[i + 1]),
           let obj = try? JSONSerialization.jsonObject(with: data) else { print("null"); exit(1) }
-    let q = App.antigravityQuota(obj) ?? [:]
+    let q = App.antigravityParse(obj) ?? [:]
     print(String(decoding: try! JSONSerialization.data(withJSONObject: q), as: UTF8.self)); exit(0)
 }
 
