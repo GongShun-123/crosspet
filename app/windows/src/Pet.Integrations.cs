@@ -100,6 +100,21 @@ namespace CrossPet
                 try { list = (Store.Json.DeserializeObject(r.Trim().Split('\n').Last()) as object[])?.OfType<string>().ToList(); } catch { }
                 Window.Dispatcher.Invoke(() => { integrated = list ?? new List<string>(); settings?.Push(); done?.Invoke(); });
             });
+            RefreshPlugins();
+        }
+
+        string pluginStatus = "[]";   // 插件版本（接入工具的只读检查 integrate.py plugins，JSON 数组），桌宠和设置页据此提醒更新
+        /// <summary>插件版本（只读检查，不改任何配置）：有新版本 / 更新了还没重开时，设置页那一行挂提醒；tellPet：桌宠刚启动，让她闲下来时说一句。
+        /// 只提醒、不自动更新——改别家配置一律让用户自己点「更新」。和 macOS 版 refreshPlugins 一致</summary>
+        void RefreshPlugins(bool tellPet = false)
+        {
+            Task.Run(() =>
+            {
+                var (output, code) = RunIntegrate("plugins");
+                var last = (output ?? "").Trim().Split('\n').Last().Trim();
+                try { if (code != 0 || !(Store.Json.DeserializeObject(last) is object[])) return; } catch { return; }
+                Window.Dispatcher.Invoke(() => { pluginStatus = last; if (tellPet) Js($"setPluginUpdates({last})"); settings?.Push(); });
+            });
         }
 
         static readonly (string id, string label, string note)[] IntegrationTargets =
@@ -143,6 +158,7 @@ namespace CrossPet
                     }
                     return d;
                 }).ToList(),
+                ["plugins"] = Store.Json.DeserializeObject(pluginStatus),
                 ["integrations"] = integrated == null ? null : IntegrationTargets.Select(t => new Dictionary<string, object>
                     { ["id"] = t.id, ["label"] = t.label, ["note"] = t.note, ["installed"] = integrated.Contains(t.id),
                       ["lastSeen"] = SeenAt(SeenKeys.TryGetValue(t.id, out var sk) ? sk : "") is double ts ? (object)(Now - ts) : null }).ToList(),

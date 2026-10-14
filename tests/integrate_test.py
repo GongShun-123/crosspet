@@ -12,6 +12,35 @@ integrate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(integrate)
 
 class IntegrationTests(unittest.TestCase):
+    # 插件版本检查（只读）：自带的 / 装到 Harness 那边的 / Harness 里正在跑的，设置页和桌宠据此提醒用户点「更新」
+    def _plugin_dirs(self, tmp, bundled='1.3.5', installed='1.3.4', running='1.3.2'):
+        b = Path(tmp) / 'bundled.js'; b.write_text(f'const PLUGIN_VERSION = "{bundled}";')
+        d = Path(tmp) / 'plugin'
+        if installed:
+            (d / 'lib').mkdir(parents=True); (d / 'lib/index.js').write_text(f'const PLUGIN_VERSION = "{installed}";  // x')
+        st = Path(tmp) / 'state'; st.mkdir()
+        if running: (st / 'deepseek-plugin.json').write_text('{"plugin": "%s", "apiKey": "ok"}' % running)
+        return b, d, st
+    def test_plugin_status_reports_three_versions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b, d, st = self._plugin_dirs(tmp)
+            got = integrate.plugin_status(['deepseek'], bundled=b, plugin_dir=d, state_dir=st)
+        self.assertEqual(got, [{'id': 'deepseek', 'label': 'DeepSeek Harness', 'bundled': '1.3.5', 'installed': '1.3.4', 'running': '1.3.2'}])
+    def test_plugin_status_only_for_integrated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b, d, st = self._plugin_dirs(tmp)
+            self.assertEqual(integrate.plugin_status(['codex'], bundled=b, plugin_dir=d, state_dir=st), [])
+    def test_plugin_status_missing_files_are_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b, d, st = self._plugin_dirs(tmp, installed=None, running=None)
+            got = integrate.plugin_status(['deepseek'], bundled=b, plugin_dir=d, state_dir=st)
+        self.assertEqual(got[0]['installed'], None); self.assertEqual(got[0]['running'], None); self.assertEqual(got[0]['bundled'], '1.3.5')
+    def test_plugin_status_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b, d, st = self._plugin_dirs(tmp)
+            before = sorted((p, p.stat().st_mtime_ns) for p in Path(tmp).rglob('*'))
+            integrate.plugin_status(['deepseek'], bundled=b, plugin_dir=d, state_dir=st)
+            self.assertEqual(sorted((p, p.stat().st_mtime_ns) for p in Path(tmp).rglob('*')), before)
     def test_codex_programs_skips_desktop_gui_exe(self):
         # Codex 桌面版的图形界面程序旁边有 resources.pak 等文件：不能当命令行跑 --version（会弹窗口）
         with tempfile.TemporaryDirectory() as tmp:

@@ -835,6 +835,30 @@ def installed() -> list:
 # 最近一次收到它的消息是什么时候、相关的环境变量、Codex 可能在 WSL 里 / CODEX_HOME 只在终端里设了……
 # 只有路径、有没有、时间和版本号，不读对话、不带任何 Key / 令牌（用户目录换成 ~）
 STATE_DIR = Path(os.environ.get("CROSSPET_STATE_DIR") or (str(SUPPORT / "state") if os.name == "nt" else "/tmp/crosspet"))
+
+
+def _plugin_version(path: Path):
+    try:
+        return re.search(r'PLUGIN_VERSION = "([^"]+)"', path.read_text(encoding="utf-8")).group(1)
+    except Exception:
+        return None
+
+
+def plugin_status(ids=None, bundled: Path = None, plugin_dir: Path = None, state_dir: Path = None) -> list:
+    """接入的 AI 里带版本号的插件（目前只有 DeepSeek Harness）：自带的 / 装到 Harness 那边的 / Harness 里正在跑的版本。
+    只读，不写任何文件。设置页和桌宠据此提醒用户自己点「更新」——不自动改别家的配置（1.3.0 自动刷新删过用户的服务商配置）"""
+    ids = installed() if ids is None else ids
+    if "deepseek" not in ids:
+        return []
+    bundled = bundled or (REPO / "integrations/deepseek/dsh-plugin-crosspet/lib/index.js")
+    plugin_dir = plugin_dir or DSH_PLUGIN_DIR
+    state_dir = state_dir or STATE_DIR
+    try:
+        running = json.loads((state_dir / "deepseek-plugin.json").read_text(encoding="utf-8")).get("plugin")
+    except Exception:
+        running = None
+    return [{"id": "deepseek", "label": "DeepSeek Harness", "bundled": _plugin_version(bundled),
+             "installed": _plugin_version(plugin_dir / "lib/index.js"), "running": running}]
 SEEN_KEY = {"claude-hooks": "claude", "claude-mod": "claude-mod", "codex": "gpt", "deepseek": "deepseek", "gemini": "gemini",
             "antigravity": "antigravity", "workbuddy": "workbuddy", "zcode": "zcode", "hermes": "hermes"}
 
@@ -1086,6 +1110,8 @@ if __name__ == "__main__":
             print(diagnose())
         except Exception as e:
             print(f"诊断出错：{type(e).__name__}: {e}")
+    elif len(sys.argv) == 2 and sys.argv[1] == "plugins":   # 给桌宠和设置窗口用：插件版本（只读），JSON 数组
+        print(json.dumps(plugin_status()))
     elif len(sys.argv) == 2 and sys.argv[1] == "installed":  # 给设置窗口用：已接入的目标，JSON 数组
         print(json.dumps(installed()))
     elif len(sys.argv) == 2 and sys.argv[1] == "status":

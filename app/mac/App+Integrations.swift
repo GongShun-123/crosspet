@@ -112,6 +112,21 @@ extension App {
             self.integrated = (try? JSONSerialization.jsonObject(with: Data(last.utf8))) as? [String] ?? []
             self.pushSettings()
         }
+        refreshPlugins()
+    }
+
+    /// 插件版本（只读检查，不改任何配置）：有新版本 / 更新了还没重开时，设置页那一行挂提醒；tellPet：桌宠刚启动，让她闲下来时说一句。
+    /// 只提醒、不自动更新——改别家配置一律让用户自己点「更新」。和 Windows 版 RefreshPlugins 一致
+    func refreshPlugins(tellPet: Bool = false) {
+        runIntegrate(["plugins"]) { [weak self] out, code in
+            guard let self, code == 0, let last = out.split(separator: "\n").last.map(String.init),
+                  (try? JSONSerialization.jsonObject(with: Data(last.utf8))) is [Any] else { return }
+            DispatchQueue.main.async {
+                self.pluginStatus = last
+                if tellPet { self.js("setPluginUpdates(\(last))") }
+                self.pushSettings()
+            }
+        }
     }
 
     func integrate(_ action: String, _ target: String) {

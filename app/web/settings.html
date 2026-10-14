@@ -139,6 +139,7 @@ input[type=range] { width: 150px; accent-color: var(--accent); }
 <div id="toast"></div>
 
 <script src="text-size.js"></script>
+<script src="plugin-update.js"></script>
 <script>
 // 和宿主（macOS 的 WKWebView / Windows 的 WebView2）通信：页面发 {cmd, ...}，宿主改完设置后调 setState(state) 把最新状态推回来
 const post = msg => window.chrome?.webview ? window.chrome.webview.postMessage(msg) : window.webkit?.messageHandlers?.settings?.postMessage(msg)
@@ -210,8 +211,13 @@ function renderIntegrations(list) {
     const never = i.installed && (i.lastSeen === null || i.lastSeen === undefined) && 'lastSeen' in i
     const note = never ? `还没收到过它的消息：${NEVER_SEEN[i.id] || '用一下它试试'}`
       : i.installed && typeof i.lastSeen === 'number' ? `${i.note ? i.note + '；' : ''}上次收到消息：${agoText(i.lastSeen)}` : i.note
-    if (note) { const n = document.createElement('small'); n.textContent = note; if (never) n.className = 'warn'; row.querySelector('.label').appendChild(n) }
-    const tag = row.querySelector('.tag'); tag.textContent = i.installed ? (never ? '已接入 · 没动静' : '已接入') : '未接入'; tag.classList.toggle('ok', i.installed && !never)
+    // 插件有新版本 / 更新了还没重开（外壳交来的版本，规则在 plugin-update.js）：这一行改成提醒，比「上次收到消息」要紧
+    const tip = i.installed && window.PluginUpdate && PluginUpdate.advice((state?.plugins || []).find(p => p.id === i.id))
+    const shown = tip ? tip.text : note
+    if (shown) { const n = document.createElement('small'); n.textContent = shown; if (never || tip) n.className = 'warn'; row.querySelector('.label').appendChild(n) }
+    const tag = row.querySelector('.tag')
+    tag.textContent = tip ? (tip.kind === 'update' ? '有新版本' : '要重开') : i.installed ? (never ? '已接入 · 没动静' : '已接入') : '未接入'
+    tag.classList.toggle('ok', i.installed && !never && !tip)
     const install = row.querySelector('[data-i=install]'); install.textContent = i.installed ? '更新' : '接入'
     const uninstall = row.querySelector('[data-i=uninstall]'); uninstall.disabled = !i.installed
     for (const b of [install, uninstall]) b.onclick = () => {

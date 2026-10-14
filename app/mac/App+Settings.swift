@@ -142,6 +142,7 @@ extension App {
                 return c
             },
             "updating": updating,
+            "plugins": (try? JSONSerialization.jsonObject(with: Data(pluginStatus.utf8))) ?? [],
         ]
         if let r = latestRelease, canSelfUpdate { state["update"] = r.tag }
         if let list = integrated, integrateScript != nil {

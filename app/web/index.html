@@ -164,6 +164,7 @@ addEventListener('error', e => { if (e.target && e.target.tagName === 'IMG' && e
 <script src="text-size.js"></script>
 <script src="codex-quota.js"></script>
 <script src="quota-aggregate.js"></script>
+<script src="plugin-update.js"></script>
 <script>
 // CrossPet 画面：由 CrossPet.app（Swift 外壳）调用这几个函数
 //   init(manifest)          角色清单（characters/*/character.json + 立绘）
@@ -1054,6 +1055,21 @@ function resumeWork() {
   shownAt = Date.now()
 }
 // AI 现在在干嘛：'asking'（等你回答）/ 'work'（干活）/ null（闲着）。看 AI 写来的最新状态，太久没动静的不算
+// 插件更新提醒（规则在 plugin-update.js）：外壳启动时把各插件的版本交过来。有要提醒的，等她闲下来说一句，
+// 每次打开桌宠最多说一次（设置页「接入 AI」那一行会一直挂着提醒）。只提醒，不替用户改配置
+let pluginTold = false
+function setPluginUpdates(list) {
+  const tip = (list || []).map(p => window.PluginUpdate && PluginUpdate.advice(p)).find(Boolean)
+  if (!tip || pluginTold) return
+  pluginTold = true
+  let tries = 0
+  const attempt = () => {
+    // 闲着才说：不在干活、没在演彩蛋、没在说别的话；等不到就过一会儿再看，最多等十来分钟
+    if (pose === 'idle' && !egg && aiActivity() !== 'work' && $('bubble').classList.contains('hide')) { say(tip.say); setTimeout(() => { if ($('bubble').textContent === tip.say) say('') }, 9000); return }
+    if (++tries < 30) setTimeout(attempt, 20000)
+  }
+  setTimeout(attempt, 15000)
+}
 function aiActivity() {
   const s = charState[charId]
   if (!s?.pose || Date.now() / 1000 - (s.ts || 0) > STUCK_AFTER / 1000) return null
