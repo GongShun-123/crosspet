@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
 using CrossPet;
 
 static class Program
@@ -39,7 +42,33 @@ static class Program
         Check("重复藏不会出错", ConcealStyle.ClickThrough(ConcealStyle.ClickThrough(ex, true), true) == (ex | transparent));
         Check("没藏时叫回来不变", ConcealStyle.ClickThrough(ex, false) == ex);
 
+        // Gemini（Antigravity）额度排版，样本和 macOS 的 tests/antigravity_quota_probe.sh 共用
+        string Agy(string name)
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "../../../../../fixtures/antigravity", name + ".json");
+            var q = AntigravityQuota.Parse(Js(JsonDocument.Parse(File.ReadAllText(path)).RootElement));
+            return q == null ? "null" : q["text"] + " | low=" + q["low"];
+        }
+        var a1 = Agy("ultra-only-model");
+        Check("Gemini：不可用的模型不算进额度（" + a1 + "）", a1.StartsWith("Gemini/Claude/GPT-OSS 剩余 100%") && !a1.Contains("｜") && a1.EndsWith("low=False"));
+        var a2 = Agy("gemini-used-up");
+        Check("Gemini：真用完了还是 0%（" + a2 + "）", a2.StartsWith("Gemini 剩余 0%") && a2.Contains("Claude/GPT-OSS 剩余 100%") && a2.EndsWith("low=True"));
+        var a3 = Agy("two-pools-with-unavailable");
+        Check("Gemini：两个池 + 不可用模型（" + a3 + "）", a3.StartsWith("Gemini 剩余 52%") && a3.Contains("Claude/GPT-OSS 剩余 99%") && !a3.Contains(" 0%") && a3.EndsWith("low=False"));
+
         Console.WriteLine(fails == 0 ? "全部通过" : $"{fails} 项失败");
         return fails == 0 ? 0 : 1;
     }
+
+    // 把 JSON 转成和 Windows 上 JavaScriptSerializer 一样的形状：对象 → Dictionary，数组 → object[]，整数 → int，小数 → decimal
+    static object Js(JsonElement e) => e.ValueKind switch
+    {
+        JsonValueKind.Object => e.EnumerateObject().ToDictionary(p => p.Name, p => Js(p.Value)),
+        JsonValueKind.Array => e.EnumerateArray().Select(Js).ToArray(),
+        JsonValueKind.String => e.GetString(),
+        JsonValueKind.Number => e.TryGetInt32(out var i) ? (object)i : e.GetDecimal(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        _ => null,
+    };
 }

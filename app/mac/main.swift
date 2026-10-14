@@ -31,6 +31,14 @@ if let i = CommandLine.arguments.firstIndex(of: "--codex-tick-probe") {
     print(App.codexTickDue(since: n[0], busyAgo: n[1] < 0 ? nil : n[1]) ? "yes" : "no"); exit(0)
 }
 
+// 测试用：把一份 Antigravity 额度回复排版，打印结果 JSON 就退出（tests/antigravity_quota_probe.sh）
+if let i = CommandLine.arguments.firstIndex(of: "--agy-quota-probe") {
+    guard i + 1 < CommandLine.arguments.count, let data = FileManager.default.contents(atPath: CommandLine.arguments[i + 1]),
+          let obj = try? JSONSerialization.jsonObject(with: data) else { print("null"); exit(1) }
+    let q = App.antigravityQuota(obj) ?? [:]
+    print(String(decoding: try! JSONSerialization.data(withJSONObject: q), as: UTF8.self)); exit(0)
+}
+
 // 测试用：算一次「换大小时窗口放在哪」，打印 x y 宽 高 就退出（tests/window_place_probe.sh）
 if let i = CommandLine.arguments.firstIndex(of: "--window-place-probe") {
     let a = Array(CommandLine.arguments.dropFirst(i + 1))

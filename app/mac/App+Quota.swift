@@ -141,7 +141,10 @@ extension App {
         let iso = ISO8601DateFormatter()
         for m in models {
             guard let qi = m["quotaInfo"] as? [String: Any] else { continue }
-            let left = (qi["remainingFraction"] as? NSNumber)?.doubleValue ?? 0  // 用完时这个字段会被省略
+            // 不可用的模型不算：比如只给 Ultra 套餐的「Gemini 4 Argon」，别的账号里标着 disabled、额度信息是空的，
+            // 以前被当成「剩 0%」排在第一行（2026-10-14 两位用户反馈）。和 Windows 版 AntigravityQuota.Parse 一致
+            if m["disabled"] as? Bool == true || (qi["remainingFraction"] == nil && qi["resetTime"] == nil) { continue }
+            let left = (qi["remainingFraction"] as? NSNumber)?.doubleValue ?? 0  // 用完时这个字段会被省略（但还有重置时间）
             let resetText = qi["resetTime"] as? String ?? ""
             let family = (m["label"] as? String ?? "").split(separator: " ").first.map(String.init) ?? "?"
             let key = "\(left)|\(resetText)"
