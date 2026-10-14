@@ -1198,7 +1198,8 @@ function playEgg(force) {
       eggStep('pretend'); say(eggLine('pretend'))
       egg.waiting = true
       egg.timers.push(setInterval(() => say(eggLine('pretend')), EGG_PRETEND_LINE_MS))
-      egg.timers.push(setTimeout(() => leaveEgg(pick((c.lines && c.lines.escape) || ['没人发现～下次见！'])), EGG_WAIT_MS))
+      // 没人点：画了 escape（自己走掉）就用它，没画就用 bye。投喂这类彩蛋的 bye 是两人同框，没人点时不能用
+      egg.timers.push(setTimeout(() => leaveEgg(pick((c.lines && c.lines.escape) || ['没人发现～下次见！']), c.poses?.escape ? 'escape' : 'bye'), EGG_WAIT_MS))
     }, EGG_POP_MS))
   })
   return true
@@ -1210,11 +1211,11 @@ function catchEgg() {
   eggStep('caught'); say(eggLine('caught'))
   egg.timers.push(setTimeout(() => leaveEgg(eggLine('bye')), EGG_CAUGHT_MS))
 }
-function leaveEgg(line) {
+function leaveEgg(line, step = 'bye') {
   if (!egg) return
   egg.waiting = false
   clearEggTimers()
-  eggStep('bye'); say(line)
+  eggStep(step); say(line)
   egg.timers.push(setTimeout(() => endEgg(), EGG_BYE_MS))
 }
 function endEgg() {

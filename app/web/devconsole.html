@@ -136,13 +136,14 @@ let statusWaiters = []
 // ---- 各姿态什么时候出现（和 docs/自定义角色.md 一致）----
 const BUILTIN = ['idle', 'listening', 'thinking', 'reading', 'writing', 'running', 'searching', 'delegating', 'drawing',
   'happy', 'proud', 'oops', 'surprised', 'pat', 'sleeping', 'tired', 'hum', 'stretch', 'yawn', 'compact', 'asking', 'update']
-const EGG_POSES = ['pop', 'pretend', 'caught', 'bye']
+const EGG_POSES = ['pop', 'pretend', 'caught', 'bye', 'escape']
 const WHEN = {
   idle: '平时', listening: '收到你的消息', thinking: '思考', reading: '读文件、搜代码', writing: '写文件、改代码', running: '跑命令',
   searching: '上网查资料', delegating: '派子任务', drawing: '画图', happy: '一轮完成', proud: '一轮用了 8 次以上工具的大活完成',
   oops: '出错', surprised: '被打断 / 被戳', pat: '被摸头', sleeping: '10 分钟没动静', tired: '额度快用完', hum: '闲着时哼歌',
   stretch: '闲着时伸懒腰', yawn: '闲着时打哈欠', compact: '压缩上下文', asking: 'AI 问你问题 / 等你授权', update: '有新版本', reset: 'Codex 额度提前重置', feast: '余额增加（充值）',
   sorry: '出错 / 被打断后你又发消息', pop: '彩蛋：跳出来', pretend: '彩蛋：装模作样（等你点她）', caught: '彩蛋：被识破', bye: '彩蛋：溜走',
+  escape: '彩蛋：没人点、自己走掉（可选，没画用 bye）',
   greet_morning: '早上（5–11 点）第一次见面', greet_noon: '中午（11–14 点）第一次见面', greet_afternoon: '下午（14–18 点）第一次见面',
   greet_evening: '晚上（18–23 点）第一次见面', greet_night: '深夜（23–2 点）第一次见面', greet_dawn: '凌晨（2–5 点）第一次见面',
   fest_halloween: '万圣节（10-31）第一次见面', fest_christmas: '圣诞（12-24、12-25）第一次见面', fest_newyear: '元旦（1-1）第一次见面',
