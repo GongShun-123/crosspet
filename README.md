@@ -139,6 +139,12 @@ DeepSeek 有了第二套衣服：穿上 Claude 的卫衣，以为自己从此和
 
 她穿着卫衣时，Claude 偶尔会跑来找自己那件印着名字的卫衣。
 
+## 皮肤：降智龙崽
+
+御姐白龙 GPT 换上了一身大一号的龙崽连体服，变成迷迷糊糊、反应慢半拍的天然呆：肚子上缝着歪歪的结饰布贴，额度被砍了会问「额度？……能吃吗。」，跑命令前要「先备份一下」。43 张立绘和一套专属台词，「设置…」→「当前角色」里选「GPT · 降智龙崽」就能换上。
+
+她穿着连体服时，DeepSeek 偶尔会端着一碗白米饭路过：你点一下，龙崽就会闻着饭香爬过来。（玩梗，不是对任何公司的事实指控。）
+
 ## 彩蛋
 
 用 Claude、GPT 或 Gemini 的时候，偶尔会「噗」地冒出一条穿着她们衣服的 DeepSeek，装模作样地学人说话。**单击她就能揪出来**，她会慌慌张张地溜走；没人理的话，她会得意地自己走掉。
@@ -189,6 +195,7 @@ DeepSeek 和 GLM 是对手，会趁对方不在上门捣乱：用 GLM 时，Deep
 - 「Claude」「GPT」「ChatGPT」「Codex」「DeepSeek」「Gemini」「Antigravity」「GLM」「ZCode」「WorkBuddy」「Hermes」是各自公司的商标，本项目仅用于指代对应产品。
 
 - **穿 Claude 卫衣的大肥鱼**：CrossPet 在「大肥鱼」基础上的二创皮肤，同样按 CC BY-NC-SA 4.0 授权。
+- **降智龙崽**：CrossPet 在「御姐白龙」基础上的二创皮肤，同样按 CC BY-NC-SA 4.0 授权。
 
 感谢为 CrossPet 出过力的朋友：[@windyduan](https://github.com/windyduan) 在 [#7](https://github.com/lokicorvus/crosspet/pull/7) 里提出并仔细测量了桌宠常驻时的耗电问题，1.3.0 的省电改动就是顺着这个思路做的。[@SkywingJam](https://github.com/SkywingJam) 在 [#9](https://github.com/lokicorvus/crosspet/pull/9) 里发现 macOS 切换桌面后特效会闪，并录屏逐帧对照、写了 WebKit 回归测试，1.3.2 据此修好了特效时钟。他还贡献了额度小窗的「合并显示各家额度」（[#11](https://github.com/lokicorvus/crosspet/pull/11)），这是 CrossPet 第一份直接合并的外部代码；之后又修好了 macOS 重启后不记得角色的问题（[#13](https://github.com/lokicorvus/crosspet/pull/13)），还细致排查了 DeepSeek 双币种余额（[#10](https://github.com/lokicorvus/crosspet/issues/10)）。
 
