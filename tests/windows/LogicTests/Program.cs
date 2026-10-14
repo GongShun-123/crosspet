@@ -64,6 +64,19 @@ static class Program
         Check("Gemini 汇总：两个窗口各一行（" + s3 + "）", s3.StartsWith("Gemini 今日 剩余 40%") && s3.Contains(" ｜ Gemini 本周 剩余 100%") && s3.Contains(" ｜ Claude/GPT 剩余 98% |"));
         Check("Gemini 汇总：空的不显示", Agy("summary-empty") == "null");
 
+        // 网页缩放自我纠正（WebView2 偶尔不按设的缩放显示：网页比窗口大，气泡、光晕被切掉）
+        Check("缩放：尺寸对得上就不改", ZoomFix.Next(1, 260, 362, 260, 362) == null);
+        Check("缩放：差 1% 以内不改（取整误差）", ZoomFix.Next(1, 260, 362, 258.5, 360) == null);
+        // 人物 80%：窗口 208 宽（设备无关像素），网页却按 100% 排成 208 宽 → 修正系数乘 208/260 = 0.8，实际缩放 0.8 × 0.8 = 0.64 时网页回到 260
+        var fx = ZoomFix.Next(1, 260, 362, 208, 289.6);
+        Check($"缩放：缩放没生效时按比例修正（{fx}）", fx.HasValue && Math.Abs(fx.Value - 0.8) < 0.001);
+        // 反过来：缩放被多乘了一次（比如系统缩放 150%），网页排成 390 宽（比应有的大，东西显得小）→ 系数 × 390/260 = 1.5
+        var fy = ZoomFix.Next(1, 260, 362, 390, 543);
+        Check($"缩放：网页偏大时系数变大（{fy}）", fy.HasValue && Math.Abs(fy.Value - 1.5) < 0.001);
+        Check("缩放：在已有系数上继续修正", Math.Abs(ZoomFix.Next(0.8, 260, 362, 252, 351).Value - 0.8 * 252 / 260) < 0.001);
+        Check("缩放：量到的数不对劲（0 或负）就不动", ZoomFix.Next(1, 260, 362, 0, 0) == null);
+        Check("缩放：系数夹在 0.25～4 之间", ZoomFix.Next(1, 260, 362, 10, 14) == 0.25 && ZoomFix.Next(1, 260, 362, 5000, 7000) == 4);
+
         Console.WriteLine(fails == 0 ? "全部通过" : $"{fails} 项失败");
         return fails == 0 ? 0 : 1;
     }

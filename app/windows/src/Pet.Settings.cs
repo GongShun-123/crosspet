@@ -47,13 +47,48 @@ namespace CrossPet
             return (x, old.Bottom - h);
         }
 
+        // ---- 网页缩放的自我纠正（原因见 ZoomFix）----
+        double zoomFix = 1, shownZoom;   // 修正系数（给 WebView2 的缩放 = 人物大小 × 它）；窗口现在按的人物大小
+        DispatcherTimer zoomCheckTimer;
+        /// <summary>调完大小停 0.5 秒再量（拖滑块时每一帧都在变，别每帧都量）</summary>
+        void CheckZoomSoon()
+        {
+            if (zoomCheckTimer == null)
+            {
+                zoomCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                zoomCheckTimer.Tick += (_, __) => { zoomCheckTimer.Stop(); _ = CheckZoom(3); };
+            }
+            zoomCheckTimer.Stop(); zoomCheckTimer.Start();
+        }
+        /// <summary>量网页实际排出来的大小，和应有的画布（pageW × pageH）对不上就按比例修正缩放，再量一次，最多 tries 次。每次修正记一行日志</summary>
+        async Task CheckZoom(int tries)
+        {
+            if (!ready || web?.CoreWebView2 == null || shownZoom <= 0) return;
+            try
+            {
+                var json = await Eval("JSON.stringify([innerWidth, innerHeight])");
+                if (!(Store.Json.DeserializeObject(Store.Json.Deserialize<string>(json)) is object[] a) || a.Length != 2) return;
+                double w = Convert.ToDouble(a[0]), h = Convert.ToDouble(a[1]);
+                var next = ZoomFix.Next(zoomFix, pageW, pageH, w, h);
+                if (next == null) return;
+                Store.Log($"网页缩放没按设的生效：网页实际 {Math.Round(w)}×{Math.Round(h)}，应为 {Math.Round(pageW)}×{Math.Round(pageH)}，缩放 {Num(Math.Round(shownZoom * zoomFix, 3))} → {Num(Math.Round(shownZoom * next.Value, 3))}");
+                zoomFix = next.Value;
+                web.ZoomFactor = shownZoom * zoomFix;
+                lastHitRects = null;   // 可点的区域跟着重新量
+                if (tries > 1) After(300, () => _ = CheckZoom(tries - 1));
+            }
+            catch (Exception e) { Store.Log("检查网页缩放出错: " + e.Message); }
+        }
+
         /// <summary>改大小：窗口 = 画布 × 人物大小，网页按人物大小缩放；放在哪见 Anchor</summary>
         void ApplyScale(double scale, Anchor anchor = Anchor.Bottom)
         {
             Native.GetWindowRect(hwnd, out var old);
             Window.Width = pageW * scale; Window.Height = pageH * scale;
             Window.UpdateLayout();
-            if (web != null) web.ZoomFactor = scale;
+            if (web != null) web.ZoomFactor = scale * zoomFix;
+            shownZoom = scale;
+            CheckZoomSoon();
             Native.GetWindowRect(hwnd, out var now);
             int w = now.Right - now.Left, h = now.Bottom - now.Top;
             double footPx = pageFoot * w / pageW;   // 网页像素 → 物理像素（含系统缩放）
